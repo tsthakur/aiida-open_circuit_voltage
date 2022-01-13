@@ -11,7 +11,7 @@ from ase.utils.structure_comparator import SymmetryEquivalenceCheck
 
 
 # not a calcfunction, used by workchain to make low and high SOC structures
-def get_unique_cation_sites(structure, cations=['Li', 'Mg']):
+def get_unique_cation_sites(structure, cations=orm.List(list=['Li', 'Mg'])):
     '''
     Returns the indices of unique cationic positions in the structure 
     '''
@@ -65,7 +65,7 @@ def get_low_SOC(structure, unique_indices):
     assert len(low_SOC_structures)==len(unique_indices), f'{len(unique_indices)} unique sites identified by pymatgen, but {len(low_SOC_structures)} unique structures generated'
 
     ## Store the ase structures as aiida StructureData
-    unique_low_SOC_aiida_structures = []
+    unique_low_SOC_aiida_structures = orm.List(list=[])
     for struct in low_SOC_structures:
         decationised_structure = orm.StructureData()
         decationised_structure.set_extra('original_unitcell', structure.extras['original_unitcell'])
@@ -79,7 +79,7 @@ def get_low_SOC(structure, unique_indices):
 
 ## Using ase symmetry comparison
 @calcfunction
-def get_low_SOC_slow(structure, cations=['Li', 'Mg']):
+def get_low_SOC_slow(structure, cations=orm.List(list=['Li', 'Mg'])):
     '''
     Returns a list of structures made after removing 1 symmeterically inquevalent cation.
     We assume that removing one cation from discharged structure doesn't distort the cell.
@@ -105,7 +105,7 @@ def get_low_SOC_slow(structure, cations=['Li', 'Mg']):
         if unique: unique_low_SOC_structures.append(struct_1)
 
     ## Store the ase structures as aiida StructureData
-    unique_low_SOC_aiida_structures = []
+    unique_low_SOC_aiida_structures = orm.List(list=[])
     for struct in unique_low_SOC_structures:
         decationised_structure = orm.StructureData()
         decationised_structure.set_extra('original_unitcell', structure.extras['original_unitcell'])
@@ -135,21 +135,22 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
     ## Make a list of all possible supercells with only 1 cation remaining
     high_SOC_structures = []
     for idx in unique_indices:
+        tmp_indices = all_cation_indices.get_list().copy()
         high_SOC = discharged_ase.copy()
         ## keeping all but one inequivalent cation
-        all_cation_indices.remove(idx)
-        del high_SOC[all_cation_indices]
+        tmp_indices.remove(idx)
+        del high_SOC[tmp_indices]
         high_SOC_structures.append(high_SOC)
     ## In case somethign went wrong with new structure generation
     assert len(high_SOC_structures)==len(unique_indices), f'{len(unique_indices)} unique sites identified by pymatgen, but {len(high_SOC_structures)} unique structures generated'
 
     ## Store the ase structures as aiida StructureData
-    unique_high_SOC_aiida_structures = []
+    unique_high_SOC_aiida_structures = orm.List(list=[])
     for struct in high_SOC_structures:
         decationised_structure = orm.StructureData()
         decationised_structure.set_extra('original_unitcell', discharged_structure.extras['original_unitcell'])
         decationised_structure.set_extra('structure_type', 'high_SOC')
-        decationised_structure.set_extra('missing_cations', 1)
+        decationised_structure.set_extra('missing_cations', len(all_cation_indices)-1)
         decationised_structure.set_ase(struct)
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_high_SOC_aiida_structures.append(decationised_structure)
@@ -157,7 +158,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
     return unique_high_SOC_aiida_structures
 
 @calcfunction
-def get_charged(structure, cation_to_remove):
+def get_charged(structure, cation_to_remove=orm.List(list=['Li', 'Mg'])):
     """
     Take the input structure and build a completely charged structure i.e. 
     structure containing no cations
@@ -166,7 +167,7 @@ def get_charged(structure, cation_to_remove):
     assert isinstance(structure, orm.StructureData), "input structure needs to be an instance of {}".format(orm.StructureData)
 
     struct_ase = structure.get_ase()
-    cations_indices = [atom.index for atom in struct_ase if atom.symbol == cation_to_remove]
+    cations_indices = [atom.index for atom in struct_ase if atom.symbol in cation_to_remove]
     del struct_ase[cations_indices]
 
     decationised_structure = orm.StructureData()
