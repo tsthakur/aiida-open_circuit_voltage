@@ -10,7 +10,7 @@ import numpy as np
 from ase.utils.structure_comparator import SymmetryEquivalenceCheck
 
 
-# not a calcfunction, used by workchain to make low and high SOC structures
+# not a calcfunction, it's used by workchain to make low and high SOC structures
 def get_unique_cation_sites(structure, cations=orm.List(list=['Li', 'Mg'])):
     '''
     Returns the indices of unique cationic positions in the structure 
@@ -35,7 +35,7 @@ def get_unique_cation_sites(structure, cations=orm.List(list=['Li', 'Mg'])):
 
     return all_cation_indices, unique_cation_indices
 
-@calcfunction
+# @calcfunction
 def make_supercell(structure, distance):
     from supercellor import supercell as sc
     pym_sc_struct = sc.make_supercell(structure.get_pymatgen_structure(), distance, verbosity=0, do_niggli_first=False)[0]

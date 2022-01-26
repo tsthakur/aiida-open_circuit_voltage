@@ -1,0 +1,29 @@
+default_inputs:
+    clean_workdir: True
+    ocv_parameters:
+        cation: 'Li'
+        distance: 8.0
+        SOC_relax: 'fixed_cell' # only do atomic relaxation
+        SOC_supercells: 'random' # use only one of the possible unique supercells for calculation
+    ocv_relax:
+        pseudo_family: 'SSSP/1.1.2/PBEsol/efficiency'
+
+default_protocol: moderate
+protocols:
+    moderate:
+        description: 'Protocol to perform the computation at normal precision at moderate computational cost.'
+    precise:
+        description: 'Protocol to perform the computation at high precision at higher computational cost.'
+        ocv_parameters:
+            cation: 'Li'
+            distance: 12.0
+            SOC_relax: 'variable_cell' # do complete vc-relax
+            SOC_supercells: 'all' # use all unique supercells and consider the most stable one for ocv calculations
+
+    fast:
+        description: 'Protocol to perform the computation at low precision at minimal computational cost for testing purposes.'
+        ocv_parameters:
+            cation: 'Li'
+            distance: 6.0
+            SOC_relax: 'no' # do not relax supercells, only do scf
+            SOC_supercells: 'random' # use only one of the unique supercells for calculation
