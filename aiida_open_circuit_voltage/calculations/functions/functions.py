@@ -11,7 +11,7 @@ from ase.utils.structure_comparator import SymmetryEquivalenceCheck
 
 
 # not a calcfunction, it's used by workchain to make low and high SOC structures
-def get_unique_cation_sites(structure, cations=orm.List(list=['Li', 'Mg'])):
+def get_unique_cation_sites(structure, cations=['Li', 'Mg']):
     '''
     Returns the indices of unique cationic positions in the structure 
     '''
@@ -46,7 +46,7 @@ def make_supercell(structure, distance):
     return sc_struct
 
 ## Using pymatgen symmetric site finder (much faster)
-@calcfunction
+# @calcfunction
 def get_low_SOC(structure, unique_indices):
     '''
     Returns a list of structures made after removing 1 symmeterically inquevalent cation.
@@ -117,7 +117,7 @@ def get_low_SOC_slow(structure, cations=orm.List(list=['Li', 'Mg'])):
 
     return unique_low_SOC_aiida_structures
 
-@calcfunction
+# @calcfunction
 def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, unique_indices):
     '''
     Returns a list of structures made after removing all but 1 symmeterically inquevalent cation
@@ -133,7 +133,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
     discharged_ase.set_cell(charged_ase.get_cell(), scale_atoms=True)
 
     ## Make a list of all possible supercells with only 1 cation remaining
-    high_SOC_structures = []
+    high_SOC_structures = [discharged_ase, ]
     for idx in unique_indices:
         tmp_indices = all_cation_indices.get_list().copy()
         high_SOC = discharged_ase.copy()
@@ -142,10 +142,10 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
         del high_SOC[tmp_indices]
         high_SOC_structures.append(high_SOC)
     ## In case somethign went wrong with new structure generation
-    assert len(high_SOC_structures)==len(unique_indices), f'{len(unique_indices)} unique sites identified by pymatgen, but {len(high_SOC_structures)} unique structures generated'
+    assert len(high_SOC_structures)-1==len(unique_indices), f'{len(unique_indices)} unique sites identified by pymatgen, but {len(high_SOC_structures)-1} unique structures generated'
 
     ## Store the ase structures as aiida StructureData
-    unique_high_SOC_aiida_structures = orm.List(list=[])
+    unique_high_SOC_aiida_structures = []
     for struct in high_SOC_structures:
         decationised_structure = orm.StructureData()
         decationised_structure.set_extra('original_unitcell', discharged_structure.extras['original_unitcell'])
@@ -155,7 +155,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_high_SOC_aiida_structures.append(decationised_structure)
 
-    return unique_high_SOC_aiida_structures
+    return unique_high_SOC_aiida_structures.pop(0), orm.List(list=unique_high_SOC_aiida_structures)
 
 @calcfunction
 def get_charged(structure, cation_to_remove=orm.List(list=['Li', 'Mg'])):

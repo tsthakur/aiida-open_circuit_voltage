@@ -3,8 +3,11 @@ default_inputs:
     ocv_parameters:
         cation: 'Li'
         distance: 8.0
-        SOC_relax: 'fixed_cell' # only do atomic relaxation
-        SOC_supercells: 'random' # use only one of the possible unique supercells for calculation
+        SOC_vc_relax: False # only do atomic relaxation
+        SOC_relax_all_supercells: False # use only one of the possible unique supercells for calculation
+        DFT_energy_bulk_Li: -195.50930942
+        DFT_energy_bulk_Mg: -457.37824385
+        energy_units: 'eV'
     ocv_relax:
         pseudo_family: 'SSSP/1.1.2/PBEsol/efficiency'
 
@@ -17,13 +20,13 @@ protocols:
         ocv_parameters:
             cation: 'Li'
             distance: 12.0
-            SOC_relax: 'variable_cell' # do complete vc-relax
-            SOC_supercells: 'all' # use all unique supercells and consider the most stable one for ocv calculations
+            SOC_vc_relax: True # do complete vc-relax
+            SOC_relax_all_supercells: True # use all unique supercells and consider the most stable one for ocv calculations
 
     fast:
         description: 'Protocol to perform the computation at low precision at minimal computational cost for testing purposes.'
         ocv_parameters:
             cation: 'Li'
             distance: 6.0
-            SOC_relax: 'no' # do not relax supercells, only do scf
-            SOC_supercells: 'random' # use only one of the unique supercells for calculation
+            SOC_vc_relax: False # do not relax supercells, only do scf
+            SOC_relax_all_supercells: False # use only one of the unique supercells for calculation
