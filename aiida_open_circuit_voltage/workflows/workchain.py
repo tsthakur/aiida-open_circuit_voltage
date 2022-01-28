@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Mother Workchain that calls PwRelaxWorkChain and PwBaseWorkChain to relax experimental structures and
-calculate DFT energies used to compute open circuit voltages (OCV) at low and high state of charge (SOC) 
-and average OCV for any arbitrary cathode material"""
+"""
+Mother Workchain that calls PwRelaxWorkChain to relax experimental structures and
+calculate DFT energies used to compute open circuit voltages (OCV) at low and high state of 
+charge (SOC) and average OCV for any arbitrary cathode material
+"""
 import numpy as np
 from aiida import orm
 from aiida.common import AttributeDict, exceptions
@@ -15,7 +17,8 @@ from aiida_open_circuit_voltage.calculations.functions import functions as func
 PwRelaxWorkChain = WorkflowFactory('quantumespresso.pw.relax')
 
 class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
-    """The main (and only?) Workchain of aiida-open_circuit_voltage that calls aiida-quantumespresso 
+    """
+    The main (and only?) Workchain of aiida-open_circuit_voltage that calls aiida-quantumespresso 
     workchains to run PwRelaxWorkChains to calculate OCV at various SOCs using Quantum ESPRESSO pw.x.
 
     The main workflow is as follows - 
@@ -42,7 +45,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
 
     @classmethod
     def define(cls, spec):
-        """Define the process specification."""
+        """
+        Define the process specification.
+        """
         super().define(spec)
         spec.expose_inputs(PwRelaxWorkChain, namespace='ocv_relax',
             exclude=('clean_workdir', 'structure'),
@@ -56,12 +61,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             cls.run_relax_discharged,
             cls.run_relax_charged,
             cls.build_supercells,
-            cls.run_relax_scaled_charged,
             cls.run_relax_low_SOC,
             cls.run_relax_high_SOC,
             cls.results,
         )
-
         spec.exit_code(202, 'ERROR_STRUCTURE_NOT_FOUND',
             message='The output relaxed structure of PwRelaxWorkChains not found.')
         spec.exit_code(203, 'ERROR_DFT_ENERGY_NOT_FOUND',
@@ -70,7 +73,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             help='The dictionary containing the three voltages - average ocv and the ocv at high and low SOCs.')
         
     def setup(self):
-        """Input validation and context setup."""
+        """
+        Input validation and context setup.
+        """
 
         self.ctx.discharged_unitcell = self.inputs.structure
 
@@ -83,10 +88,11 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         self.ctx.ocv_relax.base_final_scf.pw.parameters = self.ctx.ocv_relax.base_final_scf.pw.parameters.get_dict()
         self.ctx.ocv_relax.base_final_scf.pw.settings = self.ctx.ocv_relax.base_final_scf.pw.settings.get_dict()
 
-
     @classmethod
     def get_protocol_filepath(cls):
-        """Return ``pathlib.Path`` to the ``.yaml`` file that defines the protocols."""
+        """
+        Return ``pathlib.Path`` to the ``.yaml`` file that defines the protocols.
+        """
         from importlib_resources import files
         from aiida_open_circuit_voltage.workflows import protocols as proto
         return files(proto) / 'ocv.yaml'
@@ -95,7 +101,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
     def get_builder_from_protocol(
         cls, code, structure, protocol=None, overrides=None, **kwargs
     ):
-        """Return a builder prepopulated with inputs selected according to the chosen protocol.
+        """
+        Return a builder prepopulated with inputs selected according to the chosen protocol.
 
         :param code: the ``Code`` instance configured for the ``quantumespresso.pw`` plugin.
         :param structure: the ``StructureData`` instance to use.
@@ -121,14 +128,14 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         builder.clean_workdir = orm.Bool(inputs['clean_workdir'])
         builder.ocv_parameters = orm.Dict(dict=inputs['ocv_parameters'])
 
-        if inputs['ocv_parameters_d']['cation'] not in ['Li', 'Mg']: 
+        if inputs['ocv_parameters']['cation'] not in ['Li', 'Mg']: 
             raise NotImplemented('Only Li and Mg ion materials supported now.')
 
         return builder
 
     def run_relax_discharged(self):
         """
-        Runs a PwRelaxWorkChain to relax the input (discharged) i.e. completely lithiated structure.
+        Runs a PwRelaxWorkChain to relax the input (discharged) i.e. completely ionised structure.
         """
         inputs = self.ctx.ocv_relax
 
@@ -150,7 +157,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
 
     def run_relax_charged(self):
         """
-        Runs a PwRelaxWorkChain to relax the charged i.e. completely delithiated structure.
+        Runs a PwRelaxWorkChain to relax the charged i.e. completely deionised structure.
+        To do - run this relax chain in parallel with previous one.
         """
 
         # Saving the relaxed structure in context variable
@@ -167,6 +175,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         self.ctx.charged_unitcell.set_extra('supercell', False)
 
         inputs['structure'] = self.ctx.charged_unitcell
+
+        inputs['base']['pw']['parameters']['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
+        inputs['base_final_scf']['pw']['parameters']['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
         
         # Set the `CALL` link label
         self.inputs.metadata.call_link_label = 'charged_relax'
@@ -180,7 +191,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         return ToContext(relax_workchains=append_(running))
 
     def build_supercells(self):
-        """ Making all types of supercells here. 
+        """ 
+        Making all types of supercells here. 
         """
         # Saving the relaxed structures in context variables
 
@@ -197,12 +209,32 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         self.ctx.charged_unitcell_relaxed.set_extra('supercell', False)
 
         distance = self.ctx.ocv_parameters_d['distance']
+        distance_upperbound = self.ctx.ocv_parameters_d['distance_upperbound']
+        distance_epsilon = self.ctx.ocv_parameters_d['distance_epsilon']
 
         self.ctx.charged_supercell_relaxed = func.make_supercell(self.ctx.charged_unitcell_relaxed, orm.Float(distance))
         self.ctx.discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, orm.Float(distance))
 
-        # To do - suggest changes to distance such that this assertion doesn't fail
-        assert self.ctx.charged_unitcell.extras['missing_cations'] * len(self.ctx.charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell.sites) + len(self.ctx.charged_supercell_relaxed.sites) == len(self.ctx.discharged_supercell_relaxed.sites), 'Change distance in make_supercell()'
+        ## Checking if the two supercells have same no. of non cationic atoms and making different supercells if not
+        if len(self.ctx.charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) == len(self.ctx.discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites):
+            self.report(f'Distance<{distance}> given to build supercells was adequate, so continuing with it')
+
+        elif len(self.ctx.charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) > len(self.ctx.discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites):
+            ## Keep making new supercells till it their sizes match
+            for dist in np.arange(distance, distance_upperbound, distance_epsilon):
+                self.ctx.charged_supercell_relaxed = func.make_supercell(self.ctx.charged_unitcell_relaxed, orm.Float(distance))
+                self.ctx.discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, orm.Float(dist))
+                if len(self.ctx.charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) == len(self.ctx.discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites): 
+                    self.report(f'Distance<{distance}> given to build supercells was not appropriate, building supercells with new distance<{dist}>')
+                    break
+
+        elif len(self.ctx.charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) < len(self.ctx.discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites):
+            for dist in np.arange(distance, distance_upperbound, distance_epsilon):
+                self.ctx.charged_supercell_relaxed = func.make_supercell(self.ctx.charged_unitcell_relaxed, orm.Float(dist))
+                self.ctx.discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, orm.Float(distance))
+                if len(self.ctx.charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) == len(self.ctx.discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites): 
+                    self.report(f'Distance<{distance}> given to build supercells was not appropriate, building supercells with new distance<{dist}>')
+                    break
 
         self.ctx.charged_supercell_relaxed.set_extra('relaxed', True)
         self.ctx.charged_supercell_relaxed.set_extra('supercell', True)
@@ -212,7 +244,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
 
         all_cation_indices, unique_cation_indices = func.get_unique_cation_sites(self.ctx.discharged_supercell_relaxed, [self.ctx.ocv_parameters_d['cation']])
         self.ctx.low_SOC_supercells = func.get_low_SOC(self.ctx.discharged_supercell_relaxed, unique_cation_indices) 
-        self.ctx.scaled_charged_supercell, self.ctx.high_SOC_supercells = func.get_high_SOC(self.ctx.discharged_supercell_relaxed, self.ctx.charged_supercell_relaxed, all_cation_indices, unique_cation_indices)
+        self.ctx.high_SOC_supercells = func.get_high_SOC(self.ctx.discharged_supercell_relaxed, self.ctx.charged_supercell_relaxed, all_cation_indices, unique_cation_indices)
         self.ctx.total_cations_supercell = len(all_cation_indices)
 
         return
@@ -232,7 +264,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             inputs['relax_type'] = RelaxType.POSITIONS_CELL
         else:
             inputs['relax_type'] = RelaxType.POSITIONS
-        
+
+        inputs['base']['pw']['parameters']['SYSTEM']['tot_charge'] = float(-self.ctx.low_SOC_supercells[0].extras['missing_cations'])
+        inputs['base_final_scf']['pw']['parameters']['SYSTEM']['tot_charge'] = float(-self.ctx.low_SOC_supercells[0].extras['missing_cations'])
+
         # Set the `CALL` link label
         self.inputs.metadata.call_link_label = 'low_SOC_relax'
         inputs.metadata.label = 'low_SOC_relax'
@@ -247,6 +282,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
     def run_relax_high_SOC(self):
         """
         Runs a PwRelaxWorkChain to relax the supercells with only one cation remaining.
+        To do - run this relax chain in parallel with previous one.
         """
         inputs = self.ctx.ocv_relax
 
@@ -260,6 +296,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         else:
             inputs['relax_type'] = RelaxType.POSITIONS
         
+        inputs['base']['pw']['parameters']['SYSTEM']['tot_charge'] = float(-self.ctx.high_SOC_supercells[0].extras['missing_cations'])
+        inputs['base_final_scf']['pw']['parameters']['SYSTEM']['tot_charge'] = float(-self.ctx.high_SOC_supercells[0].extras['missing_cations'])
+
         # Set the `CALL` link label
         self.inputs.metadata.call_link_label = 'high_SOC_relax'
         inputs.metadata.label = 'high_SOC_relax'
@@ -272,7 +311,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         return ToContext(relax_workchains=append_(running))
         
     def results(self):
-        """Return the OCVs at various states of charge coefficients generated in the last MD run.
+        """
+        Return the OCVs at various states of charge coefficients generated in the last MD run.
         """
 
         try:
@@ -284,15 +324,18 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             self.report('the PwRelaxWorkChains did not generate output parameters')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
         
-        # need to change the way to load cation energy when making this workchain for any general cation
+        # need to change the way to load cation energy and z when making this workchain for any general cation
         cation_energy = self.ctx.ocv_parameters_d[f'DFT_energy_bulk_{self.ctx.ocv_parameters_d["cation"]}']
+        z = 1
+        if self.ctx.ocv_parameters_d['cation'] == 'Mg': z = 2
         # normalising wrt cations
         total_cations_unitcell = self.ctx.charged_unitcell.extras['missing_cations']
         total_cations_supercell = self.ctx.total_cations_supercell
 
-        discharged_d['energy']
-        charged_d['energy']
-        low_SOC_d['energy']
-        high_SOC_d['energy']
+        V_low_SOC = -((discharged_d['energy'] / total_cations_unitcell) - (low_SOC_d['energy'] / total_cations_supercell) - cation_energy ) / z
+        V_high_SOC = -((high_SOC_d['energy'] / total_cations_supercell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
+        V_average = -((discharged_d['energy'] / total_cations_unitcell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
 
-        self.out('open_circuit_voltages', self.ctx.relax_workchains[-1].outputs.msd_results)
+        ocv = orm.Dict(dict={'OCV_avergae': V_average, 'OCV_low_OCV': V_low_SOC, 'OCV_high_SOC': V_high_SOC, 'OCV_units': 'V'})
+
+        self.out('open_circuit_voltages', ocv)

@@ -1,13 +1,8 @@
 # -*- coding: utf-8 -*-
-from aiida.engine import calcfunction
-bohr_to_ang = 0.52917720859
-timeau_to_sec = 2.418884254E-17
 
 from aiida import orm
 from aiida.engine import calcfunction
-
 import numpy as np
-from ase.utils.structure_comparator import SymmetryEquivalenceCheck
 
 
 # not a calcfunction, it's used by workchain to make low and high SOC structures
@@ -133,7 +128,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
     discharged_ase.set_cell(charged_ase.get_cell(), scale_atoms=True)
 
     ## Make a list of all possible supercells with only 1 cation remaining
-    high_SOC_structures = [discharged_ase, ]
+    high_SOC_structures = []
     for idx in unique_indices:
         tmp_indices = all_cation_indices.get_list().copy()
         high_SOC = discharged_ase.copy()
@@ -142,7 +137,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
         del high_SOC[tmp_indices]
         high_SOC_structures.append(high_SOC)
     ## In case somethign went wrong with new structure generation
-    assert len(high_SOC_structures)-1==len(unique_indices), f'{len(unique_indices)} unique sites identified by pymatgen, but {len(high_SOC_structures)-1} unique structures generated'
+    assert len(high_SOC_structures)==len(unique_indices), f'{len(unique_indices)} unique sites identified by pymatgen, but {len(high_SOC_structures)} unique structures generated'
 
     ## Store the ase structures as aiida StructureData
     unique_high_SOC_aiida_structures = []
@@ -155,9 +150,9 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_high_SOC_aiida_structures.append(decationised_structure)
 
-    return unique_high_SOC_aiida_structures.pop(0), orm.List(list=unique_high_SOC_aiida_structures)
+    return orm.List(list=unique_high_SOC_aiida_structures)
 
-@calcfunction
+# @calcfunction
 def get_charged(structure, cation_to_remove=orm.List(list=['Li', 'Mg'])):
     """
     Take the input structure and build a completely charged structure i.e. 
