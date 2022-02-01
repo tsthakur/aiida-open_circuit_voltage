@@ -6,15 +6,17 @@ import numpy as np
 
 
 # not a calcfunction, it's used by workchain to make low and high SOC structures
-def get_unique_cation_sites(structure, cations=['Li', 'Mg']):
+# @calcfunction
+def get_unique_cation_sites(structure, cation):
     '''
     Returns the indices of unique cationic positions in the structure 
     '''
     from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
+    cation = cation.value
     structure_pym = structure.get_pymatgen_structure()
     structure_ase = structure.get_ase()
-    cation_sites = [site for site in structure_pym.sites if site.species_string in cations]
+    cation_sites = [site for site in structure_pym.sites if site.species_string == cation]
     symmops = SpacegroupAnalyzer(structure_pym, symprec=1e-5).get_space_group_operations()
 
     # first site is always unique
@@ -25,12 +27,11 @@ def get_unique_cation_sites(structure, cations=['Li', 'Mg']):
             if symmops.are_symmetrically_equivalent([site_1,], [site_2,], symm_prec=1e-5): unique = False 
         if unique: unique_sites.append(site_1)
     
-    all_cation_indices = orm.List(list=[atom.index for atom in structure_ase if atom.symbol in cations])
-    unique_cation_indices = orm.List(list=[atom.index for atom in structure_ase for unique_site in unique_sites if (np.around(atom.position, 5) == np.around(unique_site.coords, 5)).all()])
+    all_cation_indices = [atom.index for atom in structure_ase if atom.symbol == cation]
+    unique_cation_indices = [atom.index for atom in structure_ase for unique_site in unique_sites if (np.around(atom.position, 5) == np.around(unique_site.coords, 5)).all()]
 
-    return all_cation_indices, unique_cation_indices
+    return orm.List(list=all_cation_indices), orm.List(list=unique_cation_indices)
 
-# @calcfunction
 def make_supercell(structure, distance):
     from supercellor import supercell as sc
     pym_sc_struct = sc.make_supercell(structure.get_pymatgen_structure(), distance, verbosity=0, do_niggli_first=False)[0]
@@ -41,14 +42,14 @@ def make_supercell(structure, distance):
     return sc_struct
 
 ## Using pymatgen symmetric site finder (much faster)
-# @calcfunction
+@calcfunction
 def get_low_SOC(structure, unique_indices):
     '''
     Returns a list of structures made after removing 1 symmeterically inquevalent cation.
     We assume that removing one cation from discharged structure doesn't distort the cell.
     '''
-
     ## Make a list of unique (symmetrically inequivalent) supercells with 1 cation removed
+    unique_indices = unique_indices.get_list()
     structure_ase = structure.get_ase()
     low_SOC_structures = []
     for idx in unique_indices:
@@ -60,7 +61,7 @@ def get_low_SOC(structure, unique_indices):
     assert len(low_SOC_structures)==len(unique_indices), f'{len(unique_indices)} unique sites identified by pymatgen, but {len(low_SOC_structures)} unique structures generated'
 
     ## Store the ase structures as aiida StructureData
-    unique_low_SOC_aiida_structures = orm.List(list=[])
+    unique_low_SOC_aiida_structures = []
     for struct in low_SOC_structures:
         decationised_structure = orm.StructureData()
         decationised_structure.set_extra('original_unitcell', structure.extras['original_unitcell'])
@@ -70,22 +71,23 @@ def get_low_SOC(structure, unique_indices):
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_low_SOC_aiida_structures.append(decationised_structure)
 
-    return unique_low_SOC_aiida_structures
+    return orm.List(list=unique_low_SOC_aiida_structures)
 
 ## Using ase symmetry comparison
 @calcfunction
-def get_low_SOC_slow(structure, cations=orm.List(list=['Li', 'Mg'])):
+def get_low_SOC_slow(structure, cation):
     '''
     Returns a list of structures made after removing 1 symmeterically inquevalent cation.
     We assume that removing one cation from discharged structure doesn't distort the cell.
     '''
     from ase.utils.structure_comparator import SymmetryEquivalenceCheck
 
+    cation = cation.value
     structure_ase = structure.get_ase()
     ## Make a list of all possible supercells with 1 cation removed
     low_SOC_structures = []
     for atom in structure_ase:
-        if atom.symbol in cations:
+        if atom.symbol == cation:
             low_SOC = structure_ase.copy()
             del low_SOC[atom.index]
             low_SOC_structures.append(low_SOC)
@@ -100,7 +102,7 @@ def get_low_SOC_slow(structure, cations=orm.List(list=['Li', 'Mg'])):
         if unique: unique_low_SOC_structures.append(struct_1)
 
     ## Store the ase structures as aiida StructureData
-    unique_low_SOC_aiida_structures = orm.List(list=[])
+    unique_low_SOC_aiida_structures = []
     for struct in unique_low_SOC_structures:
         decationised_structure = orm.StructureData()
         decationised_structure.set_extra('original_unitcell', structure.extras['original_unitcell'])
@@ -110,9 +112,9 @@ def get_low_SOC_slow(structure, cations=orm.List(list=['Li', 'Mg'])):
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_low_SOC_aiida_structures.append(decationised_structure)
 
-    return unique_low_SOC_aiida_structures
+    return orm.List(list=unique_low_SOC_aiida_structures)
 
-# @calcfunction
+@calcfunction
 def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, unique_indices):
     '''
     Returns a list of structures made after removing all but 1 symmeterically inquevalent cation
@@ -121,7 +123,8 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
     Since it is easier to remove atoms than add one at specific sites, we scale the discharged 
     supercell wrt the lattice vectors of charged supercell and then remove all but one cation.
     '''
-
+    all_cation_indices = all_cation_indices.get_list()
+    unique_indices = unique_indices.get_list()
     discharged_ase = discharged_structure.get_ase()
     charged_ase = charged_structure.get_ase()
     ## scaling the discharged supercell
@@ -130,7 +133,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
     ## Make a list of all possible supercells with only 1 cation remaining
     high_SOC_structures = []
     for idx in unique_indices:
-        tmp_indices = all_cation_indices.get_list().copy()
+        tmp_indices = all_cation_indices.copy()
         high_SOC = discharged_ase.copy()
         ## keeping all but one inequivalent cation
         tmp_indices.remove(idx)
@@ -152,17 +155,15 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
 
     return orm.List(list=unique_high_SOC_aiida_structures)
 
-# @calcfunction
-def get_charged(structure, cation_to_remove=orm.List(list=['Li', 'Mg'])):
+@calcfunction
+def get_charged(structure, cation_to_remove):
     """
     Take the input structure and build a completely charged structure i.e. 
     structure containing no cations
     """
-    
-    assert isinstance(structure, orm.StructureData), "input structure needs to be an instance of {}".format(orm.StructureData)
-
+    cation_to_remove = cation_to_remove.value
     struct_ase = structure.get_ase()
-    cations_indices = [atom.index for atom in struct_ase if atom.symbol in cation_to_remove]
+    cations_indices = [atom.index for atom in struct_ase if atom.symbol == cation_to_remove]
     del struct_ase[cations_indices]
 
     decationised_structure = orm.StructureData()
