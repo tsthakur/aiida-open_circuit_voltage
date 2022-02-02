@@ -2,7 +2,11 @@
 An AiiDA plugin to calcutlate open circuit voltages at various charge of states for any arbitrary cathode material.
 
 ## Requirements
+<<<<<<< HEAD
 AiiDA see https://aiida.readthedocs.io/projects/aiida-core/en/latest/intro/get_started.html
+=======
+AiiDA core version > 1.1.0
+>>>>>>> b6e3ddffc8601d1d5b464c4a2cd45779239925bf
 
 Supercellor see https://github.com/lekah/supercellor
 
