@@ -83,7 +83,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         # I store input dictionaries in context variables
         self.ctx.ocv_parameters_d = self.inputs.ocv_parameters.get_dict()
         cation = orm.Str(self.ctx.ocv_parameters_d['cation'])
-        cation.store()
         self.ctx.cation = cation
 
         self.ctx.ocv_relax = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
@@ -172,7 +171,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
 
         inputs = self.ctx.ocv_relax
 
-        self.ctx.charged_unitcell = func.get_charged(self.ctx.discharged_unitcell, self.ctx.cation)
+        self.ctx.charged_unitcell = func.get_charged(self.ctx.discharged_unitcell, self.ctx.cation)['decationised_structure']
 
         self.ctx.charged_unitcell.set_extra('relaxed', False)
         self.ctx.charged_unitcell.set_extra('supercell', False)
@@ -253,9 +252,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         self.ctx.discharged_supercell_relaxed.set_extra('relaxed', True)
         self.ctx.discharged_supercell_relaxed.set_extra('supercell', True)
 
-        all_cation_indices, unique_cation_indices = func.get_unique_cation_sites(self.ctx.discharged_supercell_relaxed, self.ctx.cation)
-        self.ctx.low_SOC_supercells = func.get_low_SOC(self.ctx.discharged_supercell_relaxed, unique_cation_indices) 
-        self.ctx.high_SOC_supercells = func.get_high_SOC(self.ctx.discharged_supercell_relaxed, self.ctx.charged_supercell_relaxed, all_cation_indices, unique_cation_indices)
+        res = func.get_unique_cation_sites(self.ctx.discharged_supercell_relaxed, self.ctx.cation)
+        all_cation_indices, unique_cation_indices = res['all_cation_indices'], res['unique_cation_indices']
+        self.ctx.low_SOC_supercells = func.get_low_SOC(self.ctx.discharged_supercell_relaxed, unique_cation_indices)['unique_low_SOC_structures'] 
+        self.ctx.high_SOC_supercells = func.get_high_SOC(self.ctx.discharged_supercell_relaxed, self.ctx.charged_supercell_relaxed, all_cation_indices, unique_cation_indices)['unique_high_SOC_structures']
         self.ctx.total_cations_supercell = len(all_cation_indices)
 
         return

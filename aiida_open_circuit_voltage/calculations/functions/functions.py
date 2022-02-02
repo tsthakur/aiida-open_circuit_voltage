@@ -5,8 +5,7 @@ from aiida.engine import calcfunction
 import numpy as np
 
 
-# not a calcfunction, it's used by workchain to make low and high SOC structures
-# @calcfunction
+@calcfunction
 def get_unique_cation_sites(structure, cation):
     '''
     Returns the indices of unique cationic positions in the structure 
@@ -30,7 +29,7 @@ def get_unique_cation_sites(structure, cation):
     all_cation_indices = [atom.index for atom in structure_ase if atom.symbol == cation]
     unique_cation_indices = [atom.index for atom in structure_ase for unique_site in unique_sites if (np.around(atom.position, 5) == np.around(unique_site.coords, 5)).all()]
 
-    return orm.List(list=all_cation_indices), orm.List(list=unique_cation_indices)
+    return {'all_cation_indices':orm.List(list=all_cation_indices), 'unique_cation_indices':orm.List(list=unique_cation_indices)}
 
 def make_supercell(structure, distance):
     from supercellor import supercell as sc
@@ -71,7 +70,7 @@ def get_low_SOC(structure, unique_indices):
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_low_SOC_aiida_structures.append(decationised_structure)
 
-    return orm.List(list=unique_low_SOC_aiida_structures)
+    return {'unique_low_SOC_structures':orm.List(list=unique_low_SOC_aiida_structures)}
 
 ## Using ase symmetry comparison
 @calcfunction
@@ -112,7 +111,7 @@ def get_low_SOC_slow(structure, cation):
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_low_SOC_aiida_structures.append(decationised_structure)
 
-    return orm.List(list=unique_low_SOC_aiida_structures)
+    return {'unique_low_SOC_structures':orm.List(list=unique_low_SOC_aiida_structures)}
 
 @calcfunction
 def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, unique_indices):
@@ -153,7 +152,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_high_SOC_aiida_structures.append(decationised_structure)
 
-    return orm.List(list=unique_high_SOC_aiida_structures)
+    return {'unique_high_SOC_structures': orm.List(list=unique_high_SOC_aiida_structures)}
 
 @calcfunction
 def get_charged(structure, cation_to_remove):
@@ -173,5 +172,4 @@ def get_charged(structure, cation_to_remove):
     decationised_structure.set_ase(struct_ase)
     decationised_structure.label = decationised_structure.get_formula(mode='count')
 
-    return decationised_structure
-
+    return {'decationised_structure': decationised_structure}
