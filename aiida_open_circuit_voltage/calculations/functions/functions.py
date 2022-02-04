@@ -5,7 +5,7 @@ from aiida.engine import calcfunction
 import numpy as np
 
 
-@calcfunction
+# @calcfunction
 def get_unique_cation_sites(structure, cation):
     '''
     Returns the indices of unique cationic positions in the structure 
@@ -70,7 +70,7 @@ def get_low_SOC(structure, unique_indices):
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_low_SOC_aiida_structures.append(decationised_structure)
 
-    return {'unique_low_SOC_structures':orm.List(list=unique_low_SOC_aiida_structures)}
+    return {f'low_SOC_structure_{idx:02d}': structure for idx, structure in enumerate(unique_low_SOC_aiida_structures)}
 
 ## Using ase symmetry comparison
 @calcfunction
@@ -111,7 +111,7 @@ def get_low_SOC_slow(structure, cation):
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_low_SOC_aiida_structures.append(decationised_structure)
 
-    return {'unique_low_SOC_structures':orm.List(list=unique_low_SOC_aiida_structures)}
+    return {f'low_SOC_structure_{idx:02d}': structure for idx, structure in enumerate(unique_low_SOC_aiida_structures)}
 
 @calcfunction
 def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, unique_indices):
@@ -152,7 +152,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
         decationised_structure.label = decationised_structure.get_formula(mode='count')
         unique_high_SOC_aiida_structures.append(decationised_structure)
 
-    return {'unique_high_SOC_structures': orm.List(list=unique_high_SOC_aiida_structures)}
+    return {f'high_SOC_structure_{idx:02d}': structure for idx, structure in enumerate(unique_high_SOC_aiida_structures)}
 
 @calcfunction
 def get_charged(structure, cation_to_remove):
