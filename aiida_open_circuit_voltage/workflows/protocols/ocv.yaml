@@ -24,6 +24,26 @@ protocols:
             distance: 12.0
             SOC_vc_relax: True # do complete vc-relax
             SOC_relax_all_supercells: True # use all unique supercells and consider the most stable one for ocv calculations
+            ocv_relax: 
+                volume_convergence: 0.01
+                base:
+                    kpoints_distance: 0.10
+                    meta_parameters:
+                        conv_thr_per_atom: 0.1e-9
+                        etot_conv_thr_per_atom: 0.5e-5
+                    pw:
+                        parameters:
+                            CONTROL:
+                                forc_conv_thr: 0.5e-4
+                base_final_scf:
+                    kpoints_distance: 0.10
+                    meta_parameters:
+                        conv_thr_per_atom: 0.1e-9
+                        etot_conv_thr_per_atom: 0.5e-5
+                    pw:
+                        parameters:
+                            CONTROL:
+                                forc_conv_thr: 0.5e-4
 
     fast:
         description: 'Protocol to perform the computation at low precision at minimal computational cost for testing purposes.'
@@ -32,3 +52,24 @@ protocols:
             distance: 6.0
             SOC_vc_relax: False # do not relax supercells, only do scf
             SOC_relax_all_supercells: False # use only one of the unique supercells for calculation
+            ocv_relax: 
+                volume_convergence: 0.05
+                base:
+                    kpoints_distance: 0.75
+                    meta_parameters:
+                        conv_thr_per_atom: 1.e-8
+                        etot_conv_thr_per_atom: 1.e-3
+                    pw:
+                        parameters:
+                            CONTROL:
+                                forc_conv_thr: 5.e-3
+                base_final_scf:
+                    kpoints_distance: 0.50
+                    meta_parameters:
+                        conv_thr_per_atom: 4.e-9
+                        etot_conv_thr_per_atom: 1.e-4
+                    pw:
+                        parameters:
+                            CONTROL:
+                                forc_conv_thr: 1.e-3
+
