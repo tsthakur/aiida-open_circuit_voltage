@@ -4,7 +4,6 @@ from aiida import orm
 from aiida.engine import calcfunction
 import numpy as np
 
-
 # @calcfunction
 def get_unique_cation_sites(structure, cation):
     '''
@@ -173,3 +172,69 @@ def get_charged(structure, cation_to_remove):
     decationised_structure.label = decationised_structure.get_formula(mode='count')
 
     return {'decationised_structure': decationised_structure}
+
+def get_optimade(structure):
+    
+    ## to do - make it a class function when adding to aiida-core
+    from aiida.orm.nodes.data.structure import Kind, Site
+
+    if isinstance(structure, orm.StructureData):
+        structure_ase = structure.get_ase()
+    else:
+        raise TypeError('structure type not valid')
+
+    tmp_dicts = structure.attributes['kinds']
+    for tmp_dict in tmp_dicts:
+        tmp_dict.pop('weights')
+        symbol = tmp_dict.pop('symbols')[0]
+        tmp_dict['chemical_symbols'] = symbol
+
+    optimade = orm.Dict(dict={'immutable_id': structure.uuid,
+    'elements': structure.get_kind_names(),
+    'chemical_formula_descriptive': structure.get_formula(),
+    'dimension_types': np.multiply(structure.pbc, 1),
+    'lattice_vectors': structure_ase.get_cell().tolist(),
+    'cartesian_site_positions':structure_ase.get_positions().tolist(),
+    'species': tmp_dicts,
+    'species_at_sites': structure.get_site_kindnames(),
+    'assemblies': None,
+    'structure_features':[]})
+
+    return optimade
+
+def get_structuredata_from_optimade(structure, load_from_uuid=orm.Bool(False)):
+    
+    from aiida.orm.nodes.data.structure import Kind, Site
+
+    if isinstance(structure, orm.Dict):
+        structure_d = structure.get_dict()
+    elif isinstance(structure, dict):
+        structure_d = structure
+    else:
+        raise TypeError('structure type not valid')
+
+    structure_aiida = orm.StructureData()
+
+    uuid = structure_d['immutable_id']
+    if uuid and load_from_uuid:
+        try:
+            structure_aiida = orm.load_node(uuid)
+            structure_aiida.set_extra('queried_from_optimade', True)
+            return structure_aiida
+        except:
+            raise AttributeError('The uuid does not exist in the database')
+    elif load_from_uuid:
+        structure_aiida.set_extra('generated_from_optimade', True)
+
+    structure_aiida.set_cell(structure_d['lattice_vectors'])
+    
+    ## to do - add option to add kinds based on magnetisation treatment
+    for kind in structure_d['species']:
+        structure_aiida.append_kind(Kind(symbols=kind['chemical_symbols'][0], mass=kind['mass'][0], name=kind['name']))
+
+    for specie, position in zip(structure_d['species_at_sites'], structure_d['cartesian_site_positions']):
+        structure_aiida.append_site(Site(kind_name=specie, position=position))
+
+    structure_aiida.store()
+
+    return structure_aiida
