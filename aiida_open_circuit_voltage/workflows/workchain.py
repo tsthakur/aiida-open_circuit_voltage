@@ -156,6 +156,71 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
 
         return builder
 
+    @classmethod
+    def get_builder_from_json(cls, json_input):
+        """
+        Return a builder prepopulated with inputs selected from reading the provided json file.
+        :param json_input: the path to a json file containing inputs, if provided all the inputs will be populated from this file
+        :return: a process builder instance with all inputs defined ready for launch.
+        """
+
+        # inputs are still populated from protocol but we replace these values with those read from json file
+        overrides = None
+        inputs = cls.get_protocol_inputs(protocol, overrides)
+
+        with open(json_input) as json_file:
+            data = json.load(json_file)
+        
+        inputs_j = data['inputs']
+        meta_j = data['meta']
+
+        # loading parameters
+        protocol = inputs_j['protocol']
+        code = inputs_j['engine']['name']
+
+        # magnetic parameters
+        magnetization_treatment = inputs_j['magnetization_treatment']
+        spin_orbit = inputs_j['spin_orbit']
+        magnetization_per_site = inputs_j['magnetization_per_site']
+        
+        # loading structures
+        structure = func.get_structuredata_from_optimade(inputs_j['structure'])
+        inputs['bulk_cation_structure'] = func.get_structuredata_from_optimade(inputs_j['bulk_cation_structure'])
+
+        # other parameters
+        inputs['ocv_parameters']['cation'] = inputs_j['cation']
+        inputs['ocv_parameters']['distance'] = inputs_j['supercell_distance']
+        inputs['ocv_parameters']['distance_upperbound'] = inputs_j['supercell_distance'] * 2
+        inputs['ocv_parameters']['distance_epsilon'] = inputs_j['supercell_distance'] / 100
+        inputs['ocv_parameters']['volume_change_stability_threshold'] = inputs_j['volume_change_stability_threshold']
+
+        args = (code, structure, protocol)
+        ocv_relax = PwRelaxWorkChain.get_builder_from_protocol(*args, overrides=inputs['ocv_relax'])
+
+        # loading k-points
+        kpoints_distance = inputs_j['kpoints_distance']
+        if kpoints_distance:
+            ocv_relax['base']['kpoints_distance'] = orm.Float(0.15)
+            ocv_relax['base_final_scf']['kpoints_distance'] = orm.Float(0.15)
+        else:
+            kpoints_mesh = inputs_j['kpoints_mesh']
+
+        ocv_relax.pop('structure', None)
+        ocv_relax.pop('clean_workdir', None)
+        ocv_relax.pop('parent_folder', None)
+
+        builder = cls.get_builder()
+        builder.ocv_relax = ocv_relax
+
+        builder.structure = structure
+        builder.clean_workdir = orm.Bool(inputs['clean_workdir'])
+        builder.ocv_parameters = orm.Dict(dict=inputs['ocv_parameters'])
+
+        if inputs['ocv_parameters']['cation'] not in ['Li', 'Mg']: 
+            raise NotImplemented('Only Li and Mg ion materials supported now.')
+
+        return builder
+
     def run_relax_discharged(self):
         """
         Runs a PwRelaxWorkChain to relax the input (discharged) i.e. completely ionised structure.
