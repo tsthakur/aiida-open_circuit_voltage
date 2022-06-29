@@ -63,6 +63,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             help='If `True`, work directories of all called calculation will be cleaned at the end of execution.')
         spec.outline(
             cls.setup,
+            cls.run_bulk_cation,
             cls.run_relax_discharged,
             cls.run_relax_charged,
             cls.build_supercells,
@@ -86,7 +87,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         self.ctx.discharged_unitcell = self.inputs.structure
         if self.inputs.get('bulk_cation_structure'):
             self.ctx.bulk_cation_structure = self.inputs.bulk_cation_structure
-            self.report(f'Bulk cation structure<{self.inputs.bulk_cation_structure.pk}> provided, I will use this structure to calculate scf energy of Li.')
+            self.report(f'Bulk cation structure<{self.ctx.bulk_cation_structure.pk}> provided, I will use this structure to calculate scf energy of Li.')
         else:
             self.report('Bulk cation structure not provided, so I will use the input scf energy of Li.')
 
@@ -149,7 +150,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         builder.ocv_parameters = orm.Dict(dict=inputs['ocv_parameters'])
         if discharged_unitcell_relaxed: builder.discharged_unitcell_relaxed = discharged_unitcell_relaxed
         if charged_unitcell_relaxed: builder.charged_unitcell_relaxed = charged_unitcell_relaxed
-        if bulk_cation_structure: builder.discharged_unitcell_relaxed = discharged_unitcell_relaxed
+        if bulk_cation_structure: builder.bulk_cation_structure = bulk_cation_structure
 
         if inputs['ocv_parameters']['cation'] not in ['Li', 'Mg']: 
             raise NotImplemented('Only Li and Mg ion materials supported now.')
@@ -220,11 +221,39 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             raise NotImplemented('Only Li and Mg ion materials supported now.')
 
         return builder
+        
+    def run_bulk_cation(self):
+        """
+        Runs a PwBaseWorkChain to calculate DFT energy of bulk cation structure, if that structure is procvided.
+        Otherwise the energy is read from inputs.
+        """
+        if self.inputs.get('bulk_cation_structure'):
+
+            inputs = self.ctx.ocv_relax['base_final_scf']
+            inputs['structure'] = self.ctx.bulk_cation_structure
+        
+            # Set the `CALL` link label
+            self.inputs.metadata.call_link_label = 'bulk_cation_base'
+            inputs.metadata.label = 'bulk_cation_base'
+
+            inputs = prepare_process_inputs(PwBaseWorkChain, inputs)
+
+            running = self.submit(PwBaseWorkChain, **inputs)
+            self.report(f'launching PwBaseWorkChain<{running.pk}> on bulk cation structure') 
+            return ToContext(bulk_cation_base_workchains=append_(running))
 
     def run_relax_discharged(self):
         """
         Runs a PwRelaxWorkChain to relax the input (discharged) i.e. completely ionised structure.
         """
+        # Saving the bulk cation DFT energy in context variable
+        
+        if self.inputs.get('bulk_cation_structure'):
+            try:
+                self.ctx.bulk_cation_d = self.ctx.bulk_cation_base_workchains[-1].outputs.output_parameters.get_dict()
+            except exceptions.NotExistent:
+                self.report('The PwBaseWorkChain did not generate output parameters for bulk cation structure')
+                return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
 
         ## If relaxed unitcell is provided, I run a PwBaseWorkChain on that structure
         if self.inputs.get('discharged_unitcell_relaxed'):
@@ -232,7 +261,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             self.report(f'Relaxed discharged unitcell <{self.inputs.discharged_unitcell_relaxed.pk}> already provided')
             self.ctx.discharged_unitcell_relaxed = self.inputs.discharged_unitcell_relaxed
 
-            inputs = self.ctx.ocv_relax
+            inputs = self.ctx.ocv_relax['base_final_scf']
             inputs['structure'] = self.ctx.discharged_unitcell_relaxed
         
             # Set the `CALL` link label
@@ -281,7 +310,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             self.report(f'Relaxed charged unitcell <{self.inputs.charged_unitcell_relaxed.pk}> already provided.')
             self.ctx.charged_unitcell_relaxed = self.inputs.charged_unitcell_relaxed
 
-            inputs = self.ctx.ocv_relax
+            inputs = self.ctx.ocv_relax['base_final_scf']
             inputs['structure'] = self.ctx.charged_unitcell_relaxed
         
             # Set the `CALL` link label
@@ -470,6 +499,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             charged_d = self.ctx.relax_workchains[-3].outputs.output_parameters.get_dict()
             discharged_d = self.ctx.relax_workchains[-4].outputs.output_parameters.get_dict()
         except AttributeError:
+            self.report('the PwBaseWorkChains did not generate output parameters for charged and discharged structures')
             discharged_d, charged_d = {}, {}
             try:
                 discharged_d['energy'] = self.ctx.ocv_parameters_d['discharged_energy']
@@ -480,7 +510,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
                 return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
         
         # need to change the way to load cation energy and z when making this workchain for any general cation
-        cation_energy = self.ctx.ocv_parameters_d[f'DFT_energy_bulk_{self.ctx.ocv_parameters_d["cation"]}']
+        if self.inputs.get('bulk_cation_structure'):
+            cation_energy = self.ctx.bulk_cation_d['energy']
+        else:
+            cation_energy = self.ctx.ocv_parameters_d[f'DFT_energy_bulk_{self.ctx.ocv_parameters_d["cation"]}']
         z = 1
         if self.ctx.ocv_parameters_d['cation'] == 'Mg': z = 2
         # normalising wrt cations
