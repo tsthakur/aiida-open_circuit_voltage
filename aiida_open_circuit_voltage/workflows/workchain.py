@@ -128,7 +128,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         :param discharged_unitcell_relaxed: the ``StructureData`` instance that has been already relaxed.
         :param charged_unitcell_relaxed: the ``StructureData`` instance that has all the cations removed and has been relaxed.
         :param protocol: protocol to use, if not specified, the default will be used.
-        :param overrides: optional dictionary of inputs to override the defaults of the protocol, usually takes the pseudo potential family.
+        :param overrides: optional dictionary of inputs to override the defaults of the protocol, usually takes the pseudo potential family and parallelization options.
         :param kwargs: additional keyword arguments that will be passed to the ``get_builder_from_protocol`` of all the
             sub processes that are called by this workchain.
         :return: a process builder instance with all inputs defined ready for launch.
@@ -158,17 +158,14 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         return builder
 
     @classmethod
-    def get_builder_from_json(cls, json_input):
+    def get_builder_from_json(cls, json_input, overrides=None):
         """
         Return a builder prepopulated with inputs selected from reading the provided json file.
         :param json_input: the path to a json file containing inputs, if provided all the inputs will be populated from this file
+        :param overrides: optional dictionary of inputs to override the defaults of the protocol,
+            if it is not provided it will be read from the .
         :return: a process builder instance with all inputs defined ready for launch.
         """
-
-        # inputs are still populated from protocol but we replace these values with those read from json file
-        overrides = None
-        inputs = cls.get_protocol_inputs(protocol, overrides)
-
         with open(json_input) as json_file:
             data = json.load(json_file)
         
@@ -177,13 +174,32 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
 
         # loading parameters
         protocol = inputs_j['protocol']
+        # aiida-quantumespresso uses the keyword moderate so need to change it here
+        if protocol == 'default': protocol = 'moderate'
         code = inputs_j['engine']['name']
+
+        # inputs are still populated from protocol but we replace these values with those read from json file
+        if overrides is None:
+            try:
+                overrides = meta_j['overrides']
+            except KeyError:
+                pass
+        inputs = cls.get_protocol_inputs(protocol, overrides)
 
         # magnetic parameters
         magnetization_treatment = inputs_j['magnetization_treatment']
+        if magnetization_treatment == 'collinear':
+            spin_type = SpinType.COLLINEAR
+        elif magnetization_treatment == 'noncollinear':
+            spin_type = SpinType.NON_COLLINEAR
+        else:
+            spin_type = SpinType.NONE
         spin_orbit = inputs_j['spin_orbit']
         magnetization_per_site = inputs_j['magnetization_per_site']
-        
+        # need to tell the builder that a list containing 0s means null initial magnetic moments
+        if all(mag == 0 for mag in magnetization_per_site):
+            magnetization_per_site = None
+
         # loading structures
         structure = func.get_structuredata_from_optimade(inputs_j['structure'])
         inputs['bulk_cation_structure'] = func.get_structuredata_from_optimade(inputs_j['bulk_cation_structure'])
@@ -196,7 +212,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
         inputs['ocv_parameters']['volume_change_stability_threshold'] = inputs_j['volume_change_stability_threshold']
 
         args = (code, structure, protocol)
-        ocv_relax = PwRelaxWorkChain.get_builder_from_protocol(*args, overrides=inputs['ocv_relax'])
+        ocv_relax = PwRelaxWorkChain.get_builder_from_protocol(*args, overrides=inputs['ocv_relax'], spin_type=spin_type, initial_magnetic_moments=magnetization_per_site)
 
         # loading k-points
         kpoints_distance = inputs_j['kpoints_distance']
@@ -205,6 +221,11 @@ class OCVWorkChain(ProtocolMixin, WorkChain): # maybe BaseRestartWorkChain?
             ocv_relax['base_final_scf']['kpoints_distance'] = orm.Float(0.15)
         else:
             kpoints_mesh = inputs_j['kpoints_mesh']
+        
+        # Specifying spin-orbit here as it doesn't exist in aiida-quantumespresso
+        if spin_orbit:
+            ocv_relax.base['pw']['parameters']['SYSTEM']['lspinorb'] = spin_orbit
+            ocv_relax.base_final_scf['pw']['parameters']['SYSTEM']['lspinorb'] = spin_orbit
 
         ocv_relax.pop('structure', None)
         ocv_relax.pop('clean_workdir', None)
