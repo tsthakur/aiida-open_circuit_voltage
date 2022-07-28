@@ -54,7 +54,7 @@ protocols:
             SOC_vc_relax: False # do not relax supercells, only do scf
             SOC_relax_all_supercells: False # use only one of the unique supercells for calculation
         ocv_relax: 
-            volume_convergence: 0.05
+            volume_convergence: 0.1
             base:
                 kpoints_distance: 0.75
                 meta_parameters:
