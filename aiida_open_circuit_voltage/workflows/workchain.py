@@ -88,20 +88,21 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         Input validation and context setup.
         """
         self.ctx.discharged_unitcell = self.inputs.structure
-        if self.inputs.get('bulk_cation_structure'):
-            self.ctx.bulk_cation_structure = self.inputs.bulk_cation_structure
-            self.report(f'Bulk cation structure <{self.ctx.bulk_cation_structure.pk}> provided, I will use this structure to calculate scf energy of Li.')
-        else:
-            self.report('Bulk cation structure not provided, so I will use the input scf energy of Li.')
 
         # I store input dictionaries in context variables
         self.ctx.ocv_parameters_d = self.inputs.ocv_parameters.get_dict()
-        self.ctx.cation = orm.Str(self.ctx.ocv_parameters_d['cation'])
+        self.ctx.cation = self.ctx.ocv_parameters_d['cation']
 
         self.ctx.ocv_relax = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
         self.ctx.ocv_relax.base.pw.parameters = self.ctx.ocv_relax.base.pw.parameters.get_dict()
         self.ctx.ocv_relax.base_final_scf.pw.parameters = self.ctx.ocv_relax.base_final_scf.pw.parameters.get_dict()
-        self.ctx.Li_pseudo = self.ctx.ocv_relax.base.pw.pseudos['Li']
+        self.ctx.cation_pseudo = self.ctx.ocv_relax.base.pw.pseudos[self.ctx.cation]
+
+        if self.inputs.get('bulk_cation_structure'):
+            self.ctx.bulk_cation_structure = self.inputs.bulk_cation_structure
+            self.report(f'Bulk cation structure <{self.ctx.bulk_cation_structure.pk}> provided, I will use this structure to calculate scf energy of {self.ctx.cation}.')
+        else:
+            self.report(f'Bulk cation structure not provided, so I will use the input scf energy of {self.ctx.cation}.')
 
     @classmethod
     def get_protocol_filepath(cls):
@@ -351,7 +352,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             try:
                 self.ctx.discharged_unitcell_relaxed = self.ctx.relax_workchains[-1].outputs.output_structure
             except exceptions.NotExistent:
-                self.report('The PwRelaxWorkChains did not generate output structures')
+                self.report('The PwRelaxWorkChains did not generate output structures of discharged unitcell')
                 return self.exit_codes.ERROR_STRUCTURE_NOT_FOUND        
                 
         if self.inputs.get('charged_unitcell_relaxed'):
@@ -374,7 +375,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 inputs.pw.parameters.setdefault('CONTROL', {})['calculation'] = 'scf'
                 
                 # Removing Li pseudopotential since this structure no longer has Li in it
-                inputs['pw']['pseudos'].pop('Li')
+                inputs['pw']['pseudos'].pop(self.ctx.cation)
                 # Adding missing charge due to Li ions
                 inputs.pw.parameters['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
                 inputs.metadata.call_link_label = 'charged_scf'
@@ -388,7 +389,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         inputs = self.ctx.ocv_relax
 
-        self.ctx.charged_unitcell = func.get_charged(self.ctx.discharged_unitcell, self.ctx.cation)['decationised_structure']
+        self.ctx.charged_unitcell = func.get_charged(self.ctx.discharged_unitcell, orm.Str(self.ctx.cation))['decationised_structure']
 
         self.ctx.charged_unitcell.set_extra('relaxed', False)
         self.ctx.charged_unitcell.set_extra('supercell', False)
@@ -396,8 +397,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         inputs['structure'] = self.ctx.charged_unitcell
 
         # Removing Li pseudopotential since this structure no longer has Li in it
-        inputs['base']['pw']['pseudos'].pop('Li')
-        inputs['base_final_scf']['pw']['pseudos'].pop('Li')
+        inputs['base']['pw']['pseudos'].pop(self.ctx.cation)
+        inputs['base_final_scf']['pw']['pseudos'].pop(self.ctx.cation)
 
         # Adding missing charge due to Li ions
         inputs.base.pw.parameters['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
@@ -421,7 +422,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             try:
                 self.ctx.charged_unitcell_relaxed = self.ctx.relax_workchains[-1].outputs.output_structure
             except exceptions.NotExistent:
-                self.report('The PwRelaxWorkChains did not generate output structures')
+                self.report('The PwRelaxWorkChains did not generate output structures of charged unitcell')
                 return self.exit_codes.ERROR_STRUCTURE_NOT_FOUND
 
         self.ctx.discharged_unitcell_relaxed.set_extra('relaxed', True)
@@ -474,7 +475,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         self.ctx.discharged_supercell_relaxed.set_extra('relaxed', True)
         self.ctx.discharged_supercell_relaxed.set_extra('supercell', True)
 
-        res = func.get_unique_cation_sites(self.ctx.discharged_supercell_relaxed, self.ctx.cation)
+        res = func.get_unique_cation_sites(self.ctx.discharged_supercell_relaxed, orm.Str(self.ctx.cation))
         all_cation_indices, unique_cation_indices = res['all_cation_indices'], res['unique_cation_indices']
         self.ctx.low_SOC_supercells_d = func.get_low_SOC(self.ctx.discharged_supercell_relaxed, unique_cation_indices) 
         self.ctx.high_SOC_supercells_d = func.get_high_SOC(self.ctx.discharged_supercell_relaxed, self.ctx.charged_supercell_relaxed, all_cation_indices, unique_cation_indices)
@@ -499,8 +500,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             inputs.base.pw.parameters.pop('CELL')
 
         # Readding the Li pseudo back in
-        inputs['base']['pw']['pseudos']['Li'] = self.ctx.Li_pseudo
-        inputs['base_final_scf']['pw']['pseudos']['Li'] = self.ctx.Li_pseudo
+        inputs['base']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
+        inputs['base_final_scf']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
 
         inputs.base.pw.parameters['SYSTEM']['tot_charge'] = float(-struct.extras['missing_cations'])
         inputs.base_final_scf.pw.parameters['SYSTEM']['tot_charge'] = float(-struct.extras['missing_cations'])
@@ -555,14 +556,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             discharged_d = self.ctx.relax_workchains[-4].outputs.output_parameters.get_dict()
         except AttributeError:
             self.report('the PwBaseWorkChains did not generate output parameters for charged and discharged structures')
-            discharged_d, charged_d = {}, {}
-            try:
-                discharged_d['energy'] = self.ctx.ocv_parameters_d['discharged_energy']
-                charged_d['energy'] = self.ctx.ocv_parameters_d['charged_energy']
-                self.report('Using the DFT energies of relaxed charged and dicharged structures given as input')
-            except KeyError:
-                self.report('DFT energies of relaxed structures not provided')
-                return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
+            return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
         
         # need to change the way to load cation energy and z when making this workchain for any general cation
         if self.inputs.get('bulk_cation_structure'):
