@@ -498,6 +498,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
             inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
             inputs.base.pw.parameters.pop('CELL')
+            inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'fire'}
 
         # Readding the Li pseudo back in
         inputs['base']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
@@ -529,6 +530,11 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
             inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
+            inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'fire'}
+
+        else:
+            inputs.base.pw.parameters['CONTROL']['calculation'] = 'vc-relax'
+            inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'damp'}
         
         inputs.base.pw.parameters['SYSTEM']['tot_charge'] = float(-struct.extras['missing_cations'])
         inputs.base_final_scf.pw.parameters['SYSTEM']['tot_charge'] = float(-struct.extras['missing_cations'])
