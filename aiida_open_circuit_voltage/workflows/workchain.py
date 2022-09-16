@@ -431,15 +431,16 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         self.ctx.charged_unitcell_relaxed.set_extra('supercell', False)
 
         # I check mechanical stability on cation removal
-        threshold = self.ctx.ocv_parameters_d['volume_change_stability_threshold']
-        volume_charged = self.ctx.charged_unitcell_relaxed.get_cell_volume()
-        volume_discharged = self.ctx.discharged_unitcell_relaxed.get_cell_volume()
-        volume_change = 2 * abs(volume_discharged - volume_charged) / (volume_discharged + volume_charged)
-        if volume_change > threshold:
-            self.report(f'The Volume changed <{volume_change}> too much upon cation removal')
-            return self.exit_codes.ERROR_MECHANICAL_UNSTABLE
-        else: 
-            self.report(f'Volume change <{volume_change}> is within the threshold <{threshold}>')
+        if self.ctx.ocv_parameters_d['volume_change_stability']:
+            threshold = self.ctx.ocv_parameters_d['volume_change_stability_threshold']
+            volume_charged = self.ctx.charged_unitcell_relaxed.get_cell_volume()
+            volume_discharged = self.ctx.discharged_unitcell_relaxed.get_cell_volume()
+            volume_change = 2 * abs(volume_discharged - volume_charged) / (volume_discharged + volume_charged)
+            if volume_change > threshold:
+                self.report(f'The Volume changed <{volume_change}> too much upon cation removal')
+                return self.exit_codes.ERROR_MECHANICAL_UNSTABLE
+            else: 
+                self.report(f'Volume change <{volume_change}> is within the threshold <{threshold}>')
 
         distance = self.ctx.ocv_parameters_d['distance']
         distance_upperbound = self.ctx.ocv_parameters_d['distance_upperbound']

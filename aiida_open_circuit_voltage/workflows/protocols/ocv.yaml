@@ -11,6 +11,7 @@ default_inputs:
         DFT_energy_bulk_Mg: -457.37824385
         energy_units: 'eV'
         volume_change_stability_threshold: 0.1
+        volume_change_stability: True
     ocv_relax:
         pseudo_family: 'SSSP/1.1.2/PBEsol/efficiency'
 
@@ -49,10 +50,10 @@ protocols:
     fast:
         description: 'Protocol to perform the computation at low precision at minimal computational cost for testing purposes.'
         ocv_parameters:
-            cation: 'Li'
             distance: 6.0
             SOC_vc_relax: False # do not relax supercells, only do scf
             SOC_relax_all_supercells: False # use only one of the unique supercells for calculation
+            volume_change_stability: False
         ocv_relax: 
             volume_convergence: 0.1
             base:
