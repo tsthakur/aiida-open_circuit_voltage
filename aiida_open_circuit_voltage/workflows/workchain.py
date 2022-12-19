@@ -488,6 +488,11 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         """
         Runs a PwRelaxWorkChain to relax the supercells with one cation removed.
         """
+        if not self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
+            self.report('I do not perform low SOC calculations.')
+            self.ctx.relax_workchains.append('dummy_low_SOC_workchain')
+            return
+
         inputs = self.ctx.ocv_relax
         struct = self.ctx.low_SOC_supercells_d['low_SOC_structure_00']
 
@@ -521,6 +526,11 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         Runs a PwRelaxWorkChain to relax the supercells with only one cation remaining.
         To do - run this relax chain in parallel with previous one.
         """
+        if not self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
+            self.report('I do not perform high SOC calculations.')
+            self.ctx.relax_workchains.append('dummy_high_SOC_workchain')
+            return
+        
         inputs = self.ctx.ocv_relax
         struct = self.ctx.high_SOC_supercells_d['high_SOC_structure_00']
 
@@ -553,8 +563,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         Return the OCVs at various states of charge coefficients generated in the last MD run.
         """
         try:
-            low_SOC_d = self.ctx.relax_workchains[-2].outputs.output_parameters.get_dict()
-            high_SOC_d = self.ctx.relax_workchains[-1].outputs.output_parameters.get_dict()
+            if self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
+                low_SOC_d = self.ctx.relax_workchains[-2].outputs.output_parameters.get_dict()
+            if self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
+                high_SOC_d = self.ctx.relax_workchains[-1].outputs.output_parameters.get_dict()
         except exceptions.NotExistent:
             self.report('the PwRelaxWorkChains did not generate output parameters')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
@@ -576,8 +588,15 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         total_cations_unitcell = self.ctx.charged_unitcell.extras['missing_cations']
         total_cations_supercell = self.ctx.total_cations_supercell
 
-        V_low_SOC = -((discharged_d['energy'] / total_cations_unitcell) - (low_SOC_d['energy'] / total_cations_supercell) - cation_energy ) / z
-        V_high_SOC = -((high_SOC_d['energy'] / total_cations_supercell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
+        if self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
+            V_low_SOC = -((discharged_d['energy'] / total_cations_unitcell) - (low_SOC_d['energy'] / total_cations_supercell) - cation_energy ) / z
+        else: 
+            V_low_SOC = 'not_calculated'
+        if self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
+            V_high_SOC = -((high_SOC_d['energy'] / total_cations_supercell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
+        else: 
+            V_high_SOC = 'not_calculated'
+
         V_average = -((discharged_d['energy'] / total_cations_unitcell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
 
         ocv = orm.Dict(dict={'OCV_avergae': V_average, 'OCV_low_OCV': V_low_SOC, 'OCV_high_SOC': V_high_SOC, 'OCV_units': 'V'})

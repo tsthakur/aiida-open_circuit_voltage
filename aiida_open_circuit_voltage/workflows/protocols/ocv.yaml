@@ -12,6 +12,8 @@ default_inputs:
         energy_units: 'eV'
         volume_change_stability_threshold: 0.1
         volume_change_stability: True
+        do_high_SOC_OCV: True # if false the OCV at high SOC is not calculated and neither the high SOC supercell relaxed 
+        do_low_SOC_OCV: True # if false the OCV at low SOC is not calculated and neither the low SOC supercell relaxed 
     ocv_relax:
         pseudo_family: 'SSSP/1.1.2/PBEsol/efficiency'
 
