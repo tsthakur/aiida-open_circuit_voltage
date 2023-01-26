@@ -83,6 +83,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             message='The structure is not mechanically stable upon charging-discharging.')
         spec.output('open_circuit_voltages', valid_type=orm.Dict,
             help='The dictionary containing the three voltages - average ocv and the ocv at high and low SOCs.')
+        spec.output('common_workflow_output', valid_type=orm.Dict,
+            help='The dictionary containing the voltages and all the structures relaxed within this workflow - charged/discharged unitcells and high/low SOC supercells.')
         
     def setup(self):
         """
@@ -570,14 +572,18 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         try:
             if self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
                 self.ctx.low_SOC_d = self.ctx.relax_workchains[-2].outputs.output_parameters
+                self.ctx.low_SOC_supercell_relaxed = self.ctx.relax_workchains[-2].outputs.output_structure
             else:
                 self.ctx.low_SOC_d = None
+                self.ctx.low_SOC_supercell_relaxed = None
             if self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
                 self.ctx.high_SOC_d = self.ctx.relax_workchains[-1].outputs.output_parameters
+                self.ctx.high_SOC_supercell_relaxed = self.ctx.relax_workchains[-1].outputs.output_structure
             else:
                 self.ctx.high_SOC_d = None
+                self.ctx.high_SOC_supercell_relaxed = None
         except exceptions.NotExistent:
-            self.report('the PwRelaxWorkChains did not generate output parameters')
+            self.report('the PwRelaxWorkChains did not generate output parameters/structures')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
         try:
             self.ctx.charged_d = self.ctx.relax_workchains[-3].outputs.output_parameters
@@ -590,6 +596,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         """
         Returns the OCVs at various states of charge and outputs the dictionary based on the common workflow standards.
         """
-        ocv = func.get_OCVs(self.inputs.ocv_parameters, self.ctx.charged_d, self.ctx.discharged_d, self.ctx.low_SOC_d, self.ctx.high_SOC_d, self.ctx.bulk_cation_d)
+        ocv = func.get_OCVs(self.inputs.ocv_parameters, self.ctx.discharged_d, self.ctx.charged_d, self.ctx.low_SOC_d, self.ctx.high_SOC_d, self.ctx.bulk_cation_d)
         self.report(f'Open circuit voltages calculated and outputed in <{ocv.id}>')
         self.out('open_circuit_voltages', ocv)
+        json_out = func.get_json_outputs(ocv, self.ctx.discharged_unitcell_relaxed, self.ctx.charged_unitcell_relaxed, self.ctx.low_SOC_supercell_relaxed, self.ctx.high_SOC_supercell_relaxed)
+        self.out('common_workflow_output', json_out)
+
