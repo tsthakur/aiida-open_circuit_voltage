@@ -87,11 +87,12 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         """
         Input validation and context setup.
         """
-        self.ctx.discharged_unitcell = self.inputs.structure
-
         # I store input dictionaries in context variables
         self.ctx.ocv_parameters_d = self.inputs.ocv_parameters.get_dict()
         self.ctx.cation = self.ctx.ocv_parameters_d['cation']
+
+        self.ctx.discharged_unitcell = self.inputs.structure
+        self.ctx.charged_unitcell = func.get_charged(self.ctx.discharged_unitcell, orm.Str(self.ctx.cation))['decationised_structure']
 
         self.ctx.ocv_relax = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
         self.ctx.ocv_relax.base.pw.parameters = self.ctx.ocv_relax.base.pw.parameters.get_dict()
@@ -119,9 +120,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
     ):
         """
         Return a builder prepopulated with inputs selected according to the chosen protocol.
-
-        !!Note: If providing the relaxed unitcells, provide their single scf energies as well in the ocv_parameters dictionary!!
-
         :param code: the ``Code`` instance configured for the ``quantumespresso.pw`` plugin.
         :param structure: the ``StructureData`` instance to use.
         :param bulk_cation_structure: the ``StructureData`` instance to get DFT energy of bulk cation.
@@ -159,6 +157,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         if bulk_cation_structure:
             builder.scf = scf
             builder.bulk_cation_structure = bulk_cation_structure
+        else:
+            builder.pop('scf')
 
         if inputs['ocv_parameters']['cation'] not in ['Li', 'Mg']: 
             raise NotImplemented('Only Li and Mg ion materials supported now.')
@@ -254,27 +254,28 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         builder.ocv_parameters = orm.Dict(dict=inputs['ocv_parameters'])
 
         if inputs['ocv_parameters']['cation'] not in ['Li', 'Mg']: 
-            raise NotImplemented('Only Li and Mg ion materials supported now.')
+            raise NotImplemented('Only Li and Mg ion materials supported now.')        
 
         return builder
         
     def run_bulk_cation(self):
         """
-        Runs a PwBaseWorkChain to calculate DFT energy of bulk cation structure, if that structure is procvided.
+        Runs a PwBaseWorkChain to calculate DFT energy of bulk cation structure, if that structure is provided.
         Otherwise the energy is read from inputs.
         """
         if self.inputs.get('bulk_cation_structure'):
 
-            try:
-                qb = orm.QueryBuilder()
-                qb.append(orm.StructureData, filters={'uuid':{'==':self.ctx.bulk_cation_structure.uuid}}, tag='struct')
-                qb.append(WorkflowFactory('quantumespresso.pw.base'), with_incoming='struct', tag='base', filters={'and':[
-                    {'attributes.process_state':{'==':'finished'}}, {'attributes.exit_status':{'==':0}}]})
+            qb = orm.QueryBuilder()
+            qb.append(orm.StructureData, filters={'uuid':{'==':self.ctx.bulk_cation_structure.uuid}}, tag='struct')
+            qb.append(WorkflowFactory('quantumespresso.pw.base'), with_incoming='struct', tag='base', filters={'and':[
+                {'attributes.process_state':{'==':'finished'}}, {'attributes.exit_status':{'==':0}}]})
+                
+            if qb.count():
                 wc = qb.all(flat=True)[-1]
                 self.report(f'Workchain <{wc.pk}> corresponding to bulk cation found')
                 return ToContext(bulk_cation_base_workchains=append_(wc))
 
-            except:
+            else:
                 inputs = AttributeDict(self.exposed_inputs(PwBaseWorkChain, namespace='scf'))
                 inputs.pw.structure = self.ctx.bulk_cation_structure
 
@@ -304,16 +305,17 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.ctx.discharged_unitcell_relaxed = self.inputs.discharged_unitcell_relaxed
             self.report(f'Relaxed discharged unitcell <{self.ctx.discharged_unitcell_relaxed.pk}> already provided')
 
-            try:
-                qb = orm.QueryBuilder()
-                qb.append(orm.StructureData, filters={'uuid':{'==':self.ctx.discharged_unitcell_relaxed.uuid}}, tag='struct')
-                qb.append(WorkflowFactory('quantumespresso.pw.base'), with_incoming='struct', tag='base', filters={'and':[
-                    {'attributes.process_state':{'==':'finished'}}, {'attributes.exit_status':{'==':0}}]})
+            qb = orm.QueryBuilder()
+            qb.append(orm.StructureData, filters={'uuid':{'==':self.ctx.discharged_unitcell_relaxed.uuid}}, tag='struct')
+            qb.append(WorkflowFactory('quantumespresso.pw.relax'), with_outgoing='struct', tag='base', filters={'and':[
+                {'attributes.process_state':{'==':'finished'}}, {'attributes.exit_status':{'==':0}}]})
+
+            if qb.count():
                 wc = qb.all(flat=True)[-1]
                 self.report(f'Workchain <{wc.pk}> corresponding to relaxed discharged unitcell found')
                 return ToContext(relax_workchains=append_(wc))
 
-            except:
+            else:
                 inputs = self.ctx.ocv_relax['base_final_scf']
                 inputs.pw.structure = self.ctx.discharged_unitcell_relaxed
                 inputs.pw.parameters.setdefault('CONTROL', {})['calculation'] = 'scf'
@@ -360,23 +362,24 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.ctx.charged_unitcell_relaxed = self.inputs.charged_unitcell_relaxed
             self.report(f'Relaxed charged unitcell <{self.ctx.charged_unitcell_relaxed.pk}> already provided.')
 
-            try:
-                qb = orm.QueryBuilder()
-                qb.append(orm.StructureData, filters={'uuid':{'==':self.ctx.charged_unitcell_relaxed.uuid}}, tag='struct')
-                qb.append(WorkflowFactory('quantumespresso.pw.base'), with_incoming='struct', tag='base', filters={'and':[
-                    {'attributes.process_state':{'==':'finished'}}, {'attributes.exit_status':{'==':0}}]})
+            qb = orm.QueryBuilder()
+            qb.append(orm.StructureData, filters={'uuid':{'==':self.ctx.charged_unitcell_relaxed.uuid}}, tag='struct')
+            qb.append(WorkflowFactory('quantumespresso.pw.relax'), with_outgoing='struct', tag='base', filters={'and':[
+                {'attributes.process_state':{'==':'finished'}}, {'attributes.exit_status':{'==':0}}]})
+
+            if qb.count():
                 wc = qb.all(flat=True)[-1]
                 self.report(f'Workchain <{wc.pk}> corresponding to relaxed charged unitcell found')
                 return ToContext(relax_workchains=append_(wc))
 
-            except:
+            else:
                 inputs = self.ctx.ocv_relax['base_final_scf']
                 inputs.pw.structure = self.ctx.charged_unitcell_relaxed
                 inputs.pw.parameters.setdefault('CONTROL', {})['calculation'] = 'scf'
                 
-                # Removing Li pseudopotential since this structure no longer has Li in it
+                # Removing cation pseudopotential since this structure no longer has cation in it
                 inputs['pw']['pseudos'].pop(self.ctx.cation)
-                # Adding missing charge due to Li ions
+                # Adding missing charge due to cations
                 inputs.pw.parameters['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
                 inputs.metadata.call_link_label = 'charged_scf'
 
@@ -389,18 +392,16 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         inputs = self.ctx.ocv_relax
 
-        self.ctx.charged_unitcell = func.get_charged(self.ctx.discharged_unitcell, orm.Str(self.ctx.cation))['decationised_structure']
-
         self.ctx.charged_unitcell.set_extra('relaxed', False)
         self.ctx.charged_unitcell.set_extra('supercell', False)
 
         inputs['structure'] = self.ctx.charged_unitcell
 
-        # Removing Li pseudopotential since this structure no longer has Li in it
+        # Removing cation pseudopotential since this structure no longer has any cation in it
         inputs['base']['pw']['pseudos'].pop(self.ctx.cation)
         inputs['base_final_scf']['pw']['pseudos'].pop(self.ctx.cation)
 
-        # Adding missing charge due to Li ions
+        # Adding missing charge due to cations
         inputs.base.pw.parameters['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
         inputs.base_final_scf.pw.parameters['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
         inputs.metadata.call_link_label = 'charged_relax'
@@ -506,7 +507,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.ctx.cell = inputs.base.pw.parameters.pop('CELL')
             inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'damp'}
 
-        # Readding the Li pseudo back in
+        # Readding the cation pseudo back in
         inputs['base']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
         inputs['base_final_scf']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
 
@@ -580,7 +581,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         
         # need to change the way to load cation energy and z when making this workchain for any general cation
         if self.inputs.get('bulk_cation_structure'):
-            cation_energy = self.ctx.bulk_cation_d['energy']
+            cation_energy = self.ctx.bulk_cation_d['energy'] / len(self.ctx.bulk_cation_structure.sites)
         else:
             cation_energy = self.ctx.ocv_parameters_d[f'DFT_energy_bulk_{self.ctx.ocv_parameters_d["cation"]}']
         z = 1
