@@ -72,6 +72,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             cls.build_supercells,
             cls.run_relax_low_SOC,
             cls.run_relax_high_SOC,
+            cls.inspect_process,
             cls.results,
         )
         spec.exit_code(202, 'ERROR_STRUCTURE_NOT_FOUND',
@@ -286,6 +287,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
                 self.report(f'launching PwBaseWorkChain <{running.pk}> on bulk cation structure') 
                 return ToContext(bulk_cation_base_workchains=append_(running))
+        else:
+            self.ctx.bulk_cation_d = None
 
     def run_relax_discharged(self):
         """
@@ -294,7 +297,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         # Saving the bulk cation DFT energy in context variable
         if self.inputs.get('bulk_cation_structure'):
             try:
-                self.ctx.bulk_cation_d = self.ctx.bulk_cation_base_workchains[-1].outputs.output_parameters.get_dict()
+                self.ctx.bulk_cation_d = self.ctx.bulk_cation_base_workchains[-1].outputs.output_parameters
             except exceptions.NotExistent:
                 self.report('The PwBaseWorkChain did not generate output parameters for bulk cation structure')
                 return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
@@ -560,47 +563,33 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         
         return ToContext(relax_workchains=append_(running))
         
-    def results(self):
+    def inspect_process(self):
         """
-        Return the OCVs at various states of charge coefficients generated in the last MD run.
+        Inspects the workchains to see if all the required energies are properly calculated at various states of charge.
         """
         try:
             if self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
-                low_SOC_d = self.ctx.relax_workchains[-2].outputs.output_parameters.get_dict()
+                self.ctx.low_SOC_d = self.ctx.relax_workchains[-2].outputs.output_parameters
+            else:
+                self.ctx.low_SOC_d = None
             if self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
-                high_SOC_d = self.ctx.relax_workchains[-1].outputs.output_parameters.get_dict()
+                self.ctx.high_SOC_d = self.ctx.relax_workchains[-1].outputs.output_parameters
+            else:
+                self.ctx.high_SOC_d = None
         except exceptions.NotExistent:
             self.report('the PwRelaxWorkChains did not generate output parameters')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
         try:
-            charged_d = self.ctx.relax_workchains[-3].outputs.output_parameters.get_dict()
-            discharged_d = self.ctx.relax_workchains[-4].outputs.output_parameters.get_dict()
+            self.ctx.charged_d = self.ctx.relax_workchains[-3].outputs.output_parameters
+            self.ctx.discharged_d = self.ctx.relax_workchains[-4].outputs.output_parameters
         except AttributeError:
             self.report('the PwBaseWorkChains did not generate output parameters for charged and discharged structures')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
-        
-        # need to change the way to load cation energy and z when making this workchain for any general cation
-        if self.inputs.get('bulk_cation_structure'):
-            cation_energy = self.ctx.bulk_cation_d['energy'] / len(self.ctx.bulk_cation_structure.sites)
-        else:
-            cation_energy = self.ctx.ocv_parameters_d[f'DFT_energy_bulk_{self.ctx.ocv_parameters_d["cation"]}']
-        z = 1
-        if self.ctx.ocv_parameters_d['cation'] == 'Mg': z = 2
-        # normalising wrt cations
-        total_cations_unitcell = self.ctx.charged_unitcell.extras['missing_cations']
-        total_cations_supercell = self.ctx.total_cations_supercell
 
-        if self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
-            V_low_SOC = -((discharged_d['energy'] / total_cations_unitcell) - (low_SOC_d['energy'] / total_cations_supercell) - cation_energy ) / z
-        else: 
-            V_low_SOC = 'not_calculated'
-        if self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
-            V_high_SOC = -((high_SOC_d['energy'] / total_cations_supercell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
-        else: 
-            V_high_SOC = 'not_calculated'
-
-        V_average = -((discharged_d['energy'] / total_cations_unitcell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
-
-        ocv = orm.Dict(dict={'OCV_avergae': V_average, 'OCV_low_OCV': V_low_SOC, 'OCV_high_SOC': V_high_SOC, 'OCV_units': 'V'})
-
+    def results(self):
+        """
+        Returns the OCVs at various states of charge and outputs the dictionary based on the common workflow standards.
+        """
+        ocv = func.get_OCVs(self.inputs.ocv_parameters, self.ctx.charged_d, self.ctx.discharged_d, self.ctx.low_SOC_d, self.ctx.high_SOC_d, self.ctx.bulk_cation_d)
+        self.report(f'Open circuit voltages calculated and outputed in <{ocv.id}>')
         self.out('open_circuit_voltages', ocv)

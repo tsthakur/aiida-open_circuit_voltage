@@ -4,7 +4,7 @@ from aiida import orm
 from aiida.engine import calcfunction
 import numpy as np
 
-# @calcfunction
+@calcfunction
 def get_unique_cation_sites(structure, cation):
     '''
     Returns the indices of unique cationic positions in the structure 
@@ -238,3 +238,70 @@ def get_structuredata_from_optimade(structure, load_from_uuid=orm.Bool(False)):
     structure_aiida.store()
 
     return structure_aiida
+
+@calcfunction
+def get_OCVs(ocv_parameters, charged_ouput_parameter, discharged_ouput_parameter, low_SOC_ouput_parameter=None, high_SOC_ouput_parameter=None, bulk_cation_scf_output=None):
+    """
+    Take the output parameters containing DFT energies and calculated the OCV. 
+    structure containing no cations
+    :param charged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``charged`` structure.
+    :param discharged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``discharged`` structure.
+    :param low_SOC_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``low state of charge`` structure.
+    :param high_SOC_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``high state of charge`` structure.
+    :param ocv_parameters: the ``Dictionary`` instance used within the OCVWorkChain.
+    :param bulk_cation_scf_output: the optional ``Dictionary`` instance output of the ``PwBaseWorkChain`` run on ``bulk cation`` structure, if this is not provided the energy values are read
+    from the ocv_parameters.
+    """
+    from aiida.plugins import WorkflowFactory
+
+    ocv_parameters_d =  ocv_parameters.get_dict()
+    charged_d = charged_ouput_parameter.get_dict()
+    discharged_d = discharged_ouput_parameter.get_dict()
+
+    # Loading the charged structure
+    charged_unitcell = charged_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
+
+    if low_SOC_ouput_parameter:
+        low_SOC_d = low_SOC_ouput_parameter.get_dict()
+
+    if high_SOC_ouput_parameter:
+        high_SOC_d = high_SOC_ouput_parameter.get_dict()
+        # Loading the high SOC structure
+        high_SOC_supercell = high_SOC_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
+        total_cations_supercell = high_SOC_supercell.extras['missing_cations'] + 1
+
+    if bulk_cation_scf_output:
+        bulk_cation_d = bulk_cation_scf_output.get_dict()
+        # Loading the bulk cation structure
+        bulk_cation_structure = bulk_cation_scf_output.get_incoming(WorkflowFactory('quantumespresso.pw.base')).all_nodes()[-1].inputs['pw']['structure']
+        # I add back the only cation present in the high SOC structure, to get total number of cations in the supercell
+        cation_energy = bulk_cation_d['energy'] / len(bulk_cation_structure.sites)
+    else:
+        cation_energy = ocv_parameters_d[f'DFT_energy_bulk_{ocv_parameters_d["cation"]}']
+
+    # need to change the way to load cation energy and z when making this workchain for any general cation
+    if ocv_parameters_d['cation'] == 'Li': 
+        z = 1
+    elif ocv_parameters_d['cation'] == 'Mg': 
+        z = 2
+    else: 
+        raise NotImplemented('Only Li and Mg ion materials supported now.')
+
+    # normalising wrt cations
+    total_cations_unitcell = charged_unitcell.extras['missing_cations']
+
+    if ocv_parameters_d['do_low_SOC_OCV']:
+        V_low_SOC = -((discharged_d['energy'] / total_cations_unitcell) - (low_SOC_d['energy'] / total_cations_supercell) - cation_energy ) / z
+    else: 
+        V_low_SOC = 'not_calculated'
+
+    if ocv_parameters_d['do_high_SOC_OCV']:
+        V_high_SOC = -((high_SOC_d['energy'] / total_cations_supercell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
+    else: 
+        V_high_SOC = 'not_calculated'
+
+    V_average = -((discharged_d['energy'] / total_cations_unitcell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
+
+    ocv = orm.Dict(dict={'OCV_avergae': V_average, 'OCV_low_OCV': V_low_SOC, 'OCV_high_SOC': V_high_SOC, 'OCV_units': 'V'})
+    
+    return ocv
