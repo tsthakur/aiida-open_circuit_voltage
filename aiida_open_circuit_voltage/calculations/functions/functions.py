@@ -240,12 +240,12 @@ def get_structuredata_from_optimade(structure, load_from_uuid=orm.Bool(False)):
     return structure_aiida
 
 @calcfunction
-def get_OCVs(ocv_parameters, charged_ouput_parameter, discharged_ouput_parameter, low_SOC_ouput_parameter=None, high_SOC_ouput_parameter=None, bulk_cation_scf_output=None):
+def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter, low_SOC_ouput_parameter=None, high_SOC_ouput_parameter=None, bulk_cation_scf_output=None):
     """
     Take the output parameters containing DFT energies and calculated the OCV. 
     structure containing no cations
-    :param charged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``charged`` structure.
     :param discharged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``discharged`` structure.
+    :param charged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``charged`` structure.
     :param low_SOC_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``low state of charge`` structure.
     :param high_SOC_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``high state of charge`` structure.
     :param ocv_parameters: the ``Dictionary`` instance used within the OCVWorkChain.
@@ -255,8 +255,8 @@ def get_OCVs(ocv_parameters, charged_ouput_parameter, discharged_ouput_parameter
     from aiida.plugins import WorkflowFactory
 
     ocv_parameters_d =  ocv_parameters.get_dict()
-    charged_d = charged_ouput_parameter.get_dict()
     discharged_d = discharged_ouput_parameter.get_dict()
+    charged_d = charged_ouput_parameter.get_dict()
 
     # Loading the charged structure
     charged_unitcell = charged_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
@@ -305,3 +305,46 @@ def get_OCVs(ocv_parameters, charged_ouput_parameter, discharged_ouput_parameter
     ocv = orm.Dict(dict={'OCV_avergae': V_average, 'OCV_low_OCV': V_low_SOC, 'OCV_high_SOC': V_high_SOC, 'OCV_units': 'V'})
     
     return ocv
+
+@calcfunction
+def get_json_outputs(ocv, discharged_structure, charged_structure, low_SOC_structure=None, high_SOC_structure=None, meta=None, optional_outputs=None):
+    """
+    Take the output parameters containing DFT energies and calculated the OCV. 
+    structure containing no cations
+    :param ocv: the ``Dictionary`` instance output of the ``OCVWorkChain`` calculated by the ``get_OCVs()`` calcfunction.
+    :param discharged_structure: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``discharged`` structure, i.e. the relaxed discharged structure.
+    :param charged_structure: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``charged`` structure, i.e. the relaxed charged structure.
+    :param low_SOC_ouput_parameter: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``low state of charge`` structure, i.e. the relaxed low SOC structure.
+    :param high_SOC_ouput_parameter: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``high state of charge`` structure, i.e. the relaxed high SOC structure.
+    :param meta: the ``Dictionary`` instance used to output any ``meta`` outputs.
+    :param optional_outputs: the ``Dictionary`` instance used to output any other remaining outputs like forces, stresses etc.
+    """
+
+    discharged_structure_o = get_optimade(discharged_structure).get_dict()
+    charged_structure_o = get_optimade(charged_structure).get_dict()
+
+    if low_SOC_structure:
+        low_SOC_structure_o = {"low_SOC_structure_01": get_optimade(low_SOC_structure).get_dict()}
+    else:
+        low_SOC_structure_o = {"low_SOC_structure_01": None}
+
+    if high_SOC_structure:
+        high_SOC_structure_o = {"high_SOC_structure_01": get_optimade(high_SOC_structure).get_dict()}
+    else:
+        high_SOC_structure_o = {"high_SOC_structure_01": None}
+    
+    if not meta: meta = {}
+    if not optional_outputs: optional_outputs = {}
+
+    outputs = {"OCV_values_eV": ocv.get_dict(),
+    "fully_discharged_structure": discharged_structure_o,
+    "fully_charged_structure": charged_structure_o,
+    "fully_charged_structure_with_discharged_cell": None,
+    "high_SOC_structures": high_SOC_structure_o,
+    "low_SOC_structures": low_SOC_structure_o,
+    "optional_outputs": optional_outputs}    
+
+    json_out = orm.Dict(dict={"task": "ocv", "outputs": outputs, "meta": meta})
+
+    return json_out
+    
