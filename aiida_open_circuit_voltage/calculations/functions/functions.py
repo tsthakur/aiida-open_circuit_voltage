@@ -260,9 +260,14 @@ def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter
 
     # Loading the charged structure
     charged_unitcell = charged_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
+    total_cations_unitcell = charged_unitcell.extras['missing_cations']
 
     if low_SOC_ouput_parameter:
         low_SOC_d = low_SOC_ouput_parameter.get_dict()
+        low_SOC_supercell = low_SOC_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
+        low_SOC_ss_ase = low_SOC_supercell.get_ase()
+        cations_indices_low = [atom.index for atom in low_SOC_ss_ase if atom.symbol == ocv_parameters_d['cation']]
+        total_cations_supercell = len(cations_indices_low) + 1
 
     if high_SOC_ouput_parameter:
         high_SOC_d = high_SOC_ouput_parameter.get_dict()
@@ -288,7 +293,6 @@ def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter
         raise NotImplemented('Only Li and Mg ion materials supported now.')
 
     # normalising wrt cations
-    total_cations_unitcell = charged_unitcell.extras['missing_cations']
 
     if ocv_parameters_d['do_low_SOC_OCV']:
         V_low_SOC = -((discharged_d['energy'] / total_cations_unitcell) - (low_SOC_d['energy'] / total_cations_supercell) - cation_energy ) / z
