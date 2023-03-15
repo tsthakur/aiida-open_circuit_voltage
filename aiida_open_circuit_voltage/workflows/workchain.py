@@ -384,8 +384,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 
                 # Removing cation pseudopotential since this structure no longer has cation in it
                 inputs['pw']['pseudos'].pop(self.ctx.cation)
-                # Adding missing charge due to cations
-                inputs.pw.parameters['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
                 inputs.metadata.call_link_label = 'charged_scf'
 
                 inputs = prepare_process_inputs(PwBaseWorkChain, inputs)
@@ -406,9 +404,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         inputs['base']['pw']['pseudos'].pop(self.ctx.cation)
         inputs['base_final_scf']['pw']['pseudos'].pop(self.ctx.cation)
 
-        # Adding missing charge due to cations
-        inputs.base.pw.parameters['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
-        inputs.base_final_scf.pw.parameters['SYSTEM']['tot_charge'] = float(-self.ctx.charged_unitcell.extras['missing_cations'])
         inputs.metadata.call_link_label = 'charged_relax'
 
         inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
@@ -486,7 +481,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         all_cation_indices, unique_cation_indices = res['all_cation_indices'], res['unique_cation_indices']
         self.ctx.low_SOC_supercells_d = func.get_low_SOC(self.ctx.discharged_supercell_relaxed, unique_cation_indices) 
         self.ctx.high_SOC_supercells_d = func.get_high_SOC(self.ctx.discharged_supercell_relaxed, self.ctx.charged_supercell_relaxed, all_cation_indices, unique_cation_indices)
-        self.ctx.total_cations_supercell = len(all_cation_indices)
 
         return
 
@@ -516,8 +510,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         inputs['base']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
         inputs['base_final_scf']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
 
-        inputs.base.pw.parameters['SYSTEM']['tot_charge'] = float(-struct.extras['missing_cations'])
-        inputs.base_final_scf.pw.parameters['SYSTEM']['tot_charge'] = float(-struct.extras['missing_cations'])
         inputs.metadata.call_link_label = 'low_SOC_relax'
 
         inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
@@ -554,8 +546,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'bfgs'}
             inputs.base.pw.parameters['CELL'] = self.ctx.cell
 
-        inputs.base.pw.parameters['SYSTEM']['tot_charge'] = float(-struct.extras['missing_cations'])
-        inputs.base_final_scf.pw.parameters['SYSTEM']['tot_charge'] = float(-struct.extras['missing_cations'])
         inputs.metadata.call_link_label = 'high_SOC_relax'
 
         inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
