@@ -292,19 +292,21 @@ def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter
     else: 
         raise NotImplemented('Only Li and Mg ion materials supported now.')
 
-    # normalising wrt cations
-
+    # I use the following standard equation for calculating voltage between 2 states with x1 and x2 concentration of Li atoms
+    # voltage = -[E(Lix2) - E(Lix1) - [x2-x1]E(Li)] / [x2-x1]z
     if ocv_parameters_d['do_low_SOC_OCV']:
-        V_low_SOC = -((discharged_d['energy'] / total_cations_unitcell) - (low_SOC_d['energy'] / total_cations_supercell) - cation_energy ) / z
+        # x2-x1 = 1 in this case
+        V_low_SOC = (low_SOC_d['energy'] - (total_cations_supercell / total_cations_unitcell) * discharged_d['energy'] + 1 * cation_energy) / (z * 1) 
     else: 
         V_low_SOC = 'not_calculated'
 
     if ocv_parameters_d['do_high_SOC_OCV']:
-        V_high_SOC = -((high_SOC_d['energy'] / total_cations_supercell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
+        # x2-x1 = 1 in this case
+        V_high_SOC = ((total_cations_supercell / total_cations_unitcell) * charged_d['energy'] - high_SOC_d['energy'] + 1 * cation_energy) / (z * 1)
     else: 
         V_high_SOC = 'not_calculated'
-
-    V_average = -((discharged_d['energy'] / total_cations_unitcell) - (charged_d['energy'] / total_cations_unitcell) - cation_energy ) / z
+    # x2-x1 = all Li atoms in the discharged unitcell in this case
+    V_average = ((charged_d['energy'] - discharged_d['energy'] + total_cations_unitcell * cation_energy) ) / (z * total_cations_unitcell)
 
     ocv = orm.Dict(dict={'OCV_avergae': V_average, 'OCV_low_OCV': V_low_SOC, 'OCV_high_SOC': V_high_SOC, 'OCV_units': 'V'})
     
@@ -324,8 +326,10 @@ def get_json_outputs(ocv, discharged_structure, charged_structure, low_SOC_struc
     :param optional_outputs: the ``Dictionary`` instance used to output any other remaining outputs like forces, stresses etc.
     """
 
-    discharged_structure_o = get_optimade(discharged_structure).get_dict()
-    charged_structure_o = get_optimade(charged_structure).get_dict()
+    from aiida_open_circuit_voltage.calculations.functions import functions as func
+
+    discharged_structure_o = func.get_optimade(discharged_structure).get_dict()
+    charged_structure_o = func.get_optimade(charged_structure).get_dict()
 
     if low_SOC_structure:
         low_SOC_structure_o = {"low_SOC_structure_01": get_optimade(low_SOC_structure).get_dict()}
