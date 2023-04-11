@@ -283,6 +283,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 inputs.pw.structure = self.ctx.bulk_cation_structure
 
                 inputs.metadata.call_link_label = 'bulk_cation_scf'
+                inputs.metadata.label = 'bulk_cation_scf'
                 inputs = prepare_process_inputs(PwBaseWorkChain, inputs)
 
                 running = self.submit(PwBaseWorkChain, **inputs)
@@ -325,6 +326,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 inputs.pw.structure = self.ctx.discharged_unitcell_relaxed
                 inputs.pw.parameters.setdefault('CONTROL', {})['calculation'] = 'scf'
                 inputs.metadata.call_link_label = 'discharged_scf'
+                inputs.metadata.label = 'discharged_scf'
 
                 inputs = prepare_process_inputs(PwBaseWorkChain, inputs)
 
@@ -340,6 +342,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         inputs['structure'] = self.ctx.discharged_unitcell
         inputs.metadata.call_link_label = 'discharged_relax'
+        inputs.metadata.label = 'discharged_relax'
 
         inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
 
@@ -385,6 +388,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 # Removing cation pseudopotential since this structure no longer has cation in it
                 inputs['pw']['pseudos'].pop(self.ctx.cation)
                 inputs.metadata.call_link_label = 'charged_scf'
+                inputs.metadata.label = 'charged_scf'
 
                 inputs = prepare_process_inputs(PwBaseWorkChain, inputs)
 
@@ -405,6 +409,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         inputs['base_final_scf']['pw']['pseudos'].pop(self.ctx.cation)
 
         inputs.metadata.call_link_label = 'charged_relax'
+        inputs.metadata.label = 'charged_relax'
 
         inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
 
@@ -504,13 +509,14 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
             inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
             self.ctx.cell = inputs.base.pw.parameters.pop('CELL')
-            inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'damp'}
+            # inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'damp'}
 
         # Readding the cation pseudo back in
         inputs['base']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
         inputs['base_final_scf']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
 
         inputs.metadata.call_link_label = 'low_SOC_relax'
+        inputs.metadata.label = 'low_SOC_relax'
 
         inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
         running = self.submit(PwRelaxWorkChain, **inputs)
@@ -539,14 +545,15 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
             inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
-            inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'damp'}
+            # inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'damp'}
 
         else:
             inputs.base.pw.parameters['CONTROL']['calculation'] = 'vc-relax'
-            inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'bfgs'}
+            # inputs.base.pw.parameters['IONS'] = {'ion_dynamics': 'bfgs'}
             inputs.base.pw.parameters['CELL'] = self.ctx.cell
 
         inputs.metadata.call_link_label = 'high_SOC_relax'
+        inputs.metadata.label = 'high_SOC_relax'
 
         inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
         running = self.submit(PwRelaxWorkChain, **inputs)
