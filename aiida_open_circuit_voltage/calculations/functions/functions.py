@@ -172,6 +172,28 @@ def get_charged(structure, cation_to_remove):
 
     return {'decationised_structure': decationised_structure}
 
+@calcfunction
+def get_constrained_charged(structure, cation_to_remove, scaling_factor):
+    """
+    Take the relaxed discharged structure and build a completely charged structure i.e. 
+    structure containing no cations, which is then scaled wrt to the scaling factor
+    """
+    cation_to_remove = cation_to_remove.value
+    struct_ase = structure.get_ase()
+    cations_indices = [atom.index for atom in struct_ase if atom.symbol == cation_to_remove]
+    del struct_ase[cations_indices]
+
+    struct_ase.set_cell(struct_ase.get_cell() * scaling_factor, scale_atoms=True)
+
+    constrained_structure = orm.StructureData()
+    constrained_structure.set_extra('original_unitcell', structure.uuid)
+    constrained_structure.set_extra('structure_type', 'charged_constrained')
+    constrained_structure.set_extra('missing_cations', len(cations_indices))
+    constrained_structure.set_ase(struct_ase)
+    constrained_structure.label = constrained_structure.get_formula(mode='count')
+
+    return constrained_structure
+
 def get_optimade(structure):
     
     ## to do - make it a class function when adding to aiida-core
