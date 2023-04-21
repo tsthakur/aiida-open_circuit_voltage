@@ -511,20 +511,18 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             return
 
         inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
-        low_SOC_structure = self.ctx.low_SOC_supercells_d['low_SOC_structure_00']
+        
+        ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
+        inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
 
         if self.ctx.ocv_parameters_d['SOC_relax_all_supercells']:
             raise NotImplementedError('Relaxing all low SOC supercells is not implemented yet')
         else:
-            inputs['structure'] = low_SOC_structure
+            inputs['structure'] = self.ctx.low_SOC_supercells_d['low_SOC_structure_00']
 
         if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
             inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
             inputs.base.pw.parameters.pop('CELL')
-
-        # Readding the cation pseudo back in if relaxed_charged was not provided
-        inputs['base']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
-        inputs['base_final_scf']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
 
         inputs.metadata.call_link_label = 'low_SOC_relax'
         inputs.metadata.label = 'low_SOC_relax'
@@ -547,23 +545,18 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             return
         
         inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
-        high_SOC_structure = self.ctx.high_SOC_supercells_d['high_SOC_structure_00']
+                
+        ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
+        inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
 
         if self.ctx.ocv_parameters_d['SOC_relax_all_supercells']:
             raise NotImplementedError('Relaxing all high SOC supercells is not implemented yet')
         else:
-            inputs['structure'] = high_SOC_structure
+            inputs['structure'] = self.ctx.high_SOC_supercells_d['high_SOC_structure_00']
 
         if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
             inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
-
-        else:
-            inputs.base.pw.parameters['CONTROL']['calculation'] = 'vc-relax'
-            inputs.base.pw.parameters['CELL'] = self.ctx.cell
-        
-        # Readding the cation pseudo back in
-        inputs['base']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
-        inputs['base_final_scf']['pw']['pseudos'][self.ctx.cation] = self.ctx.cation_pseudo
+            inputs.base.pw.parameters.pop('CELL')
 
         inputs.metadata.call_link_label = 'high_SOC_relax'
         inputs.metadata.label = 'high_SOC_relax'
