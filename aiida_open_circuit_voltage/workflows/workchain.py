@@ -451,40 +451,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         # I make the supercells with same number of non cationic species
         distance = self.ctx.ocv_parameters_d['distance']
-        distance_upperbound = self.ctx.ocv_parameters_d['distance_upperbound']
-        distance_epsilon = self.ctx.ocv_parameters_d['distance_epsilon']
-
-        charged_supercell_relaxed = func.make_supercell(self.ctx.charged_unitcell_relaxed, distance)
         discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, distance)
-
-        ## Following is required. If the low_SOC supercell has different size than high_SOC supercell, their alpha parameters
-        ## would be different, so the OCV values will always be correctly normalised irrespective of those supercell size. But 
-        ## the way low_SOC and high_SOC are generated depends on the unique cation idices and volumes of the charged-discharged
-        ## supercells size, so those supercells should have comparable volume or same no. of non cationic sepcies
-        
-        # Checking if the two supercells have same no. of non cationic atoms and making different supercells if not
-        if len(charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) == len(discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites):
-            self.report(f'Distance <{distance}> given to build supercells was adequate, so continuing with it')
-
-        elif len(charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) > len(discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites):
-            # Keep making new supercells till their sizes match
-            for dist in np.arange(distance, distance_upperbound, distance_epsilon):
-                charged_supercell_relaxed = func.make_supercell(self.ctx.charged_unitcell_relaxed, distance)
-                discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, dist)
-                if len(charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) == len(discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites): 
-                    self.report(f'Distance <{distance}> given to build supercells was not appropriate, building supercells with new distance <{dist}>')
-                    break
-
-        elif len(charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) < len(discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites):
-            for dist in np.arange(distance, distance_upperbound, distance_epsilon):
-                charged_supercell_relaxed = func.make_supercell(self.ctx.charged_unitcell_relaxed, dist)
-                discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, distance)
-                if len(charged_supercell_relaxed.sites) / len(self.ctx.charged_unitcell_relaxed.sites) == len(discharged_supercell_relaxed.sites) / len(self.ctx.discharged_unitcell_relaxed.sites): 
-                    self.report(f'Distance <{distance}> given to build supercells was not appropriate, building supercells with new distance <{dist}>')
-                    break
-        
-        charged_supercell_relaxed.set_extra('relaxed', True)
-        charged_supercell_relaxed.set_extra('supercell', True)
         discharged_supercell_relaxed.set_extra('relaxed', True)
         discharged_supercell_relaxed.set_extra('supercell', True)
 
@@ -493,11 +460,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         # I make the low and high SOC supercells and store the dictionray of structures as context variables
         self.ctx.low_SOC_supercells_d = func.get_low_SOC(discharged_supercell_relaxed, unique_cation_indices) 
-        ## scaling the discharged supercell wrt charged_supercell
-        scaling_factor = charged_supercell_relaxed.get_ase().get_cell() / discharged_supercell_relaxed.get_ase().get_cell()
         ## scaling the discharged supercell wrt volume ratio
-        # scaling_factor = volume_charged / volume_discharged
-        self.ctx.high_SOC_supercells_d = func.get_high_SOC(discharged_supercell_relaxed, scaling_factor, all_cation_indices, unique_cation_indices)
+        scaling_factor = volume_charged / volume_discharged
+        self.ctx.high_SOC_supercells_d = func.get_high_SOC(discharged_supercell_relaxed, orm.Float(scaling_factor), all_cation_indices, unique_cation_indices)
 
         return
 
