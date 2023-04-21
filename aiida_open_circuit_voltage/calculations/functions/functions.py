@@ -113,7 +113,7 @@ def get_low_SOC_slow(structure, cation):
     return {f'low_SOC_structure_{idx:02d}': structure for idx, structure in enumerate(unique_low_SOC_aiida_structures)}
 
 @calcfunction
-def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, unique_indices):
+def get_high_SOC(structure, scaling_factor, all_cation_indices, unique_indices):
     '''
     Returns a list of structures made after removing all but 1 symmeterically inquevalent cation
     i.e. a structure that contains only 1 cation.
@@ -123,16 +123,15 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
     '''
     all_cation_indices = all_cation_indices.get_list()
     unique_indices = unique_indices.get_list()
-    discharged_ase = discharged_structure.get_ase()
-    charged_ase = charged_structure.get_ase()
-    ## scaling the discharged supercell
-    discharged_ase.set_cell(charged_ase.get_cell(), scale_atoms=True)
+    structure_ase = structure.get_ase()
+
+    structure_ase.set_cell(structure_ase.get_cell() * scaling_factor, scale_atoms=True)
 
     ## Make a list of all possible supercells with only 1 cation remaining
     high_SOC_structures = []
     for idx in unique_indices:
         tmp_indices = all_cation_indices.copy()
-        high_SOC = discharged_ase.copy()
+        high_SOC = structure_ase.copy()
         ## keeping all but one inequivalent cation
         tmp_indices.remove(idx)
         del high_SOC[tmp_indices]
@@ -144,7 +143,7 @@ def get_high_SOC(discharged_structure, charged_structure, all_cation_indices, un
     unique_high_SOC_aiida_structures = []
     for struct in high_SOC_structures:
         decationised_structure = orm.StructureData()
-        decationised_structure.set_extra('original_unitcell', discharged_structure.extras['original_unitcell'])
+        decationised_structure.set_extra('original_unitcell', structure.extras['original_unitcell'])
         decationised_structure.set_extra('structure_type', 'high_SOC')
         decationised_structure.set_extra('missing_cations', len(all_cation_indices)-1)
         decationised_structure.set_ase(struct)
