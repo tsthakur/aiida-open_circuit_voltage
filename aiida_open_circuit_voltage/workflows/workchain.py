@@ -209,8 +209,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         # other parameters
         inputs['ocv_parameters']['cation'] = inputs_j['cation']
         inputs['ocv_parameters']['distance'] = inputs_j['supercell_distance']
-        inputs['ocv_parameters']['distance_upperbound'] = inputs_j['supercell_distance'] * 2
-        inputs['ocv_parameters']['distance_epsilon'] = inputs_j['supercell_distance'] / 100
         inputs['ocv_parameters']['volume_change_stability_threshold'] = inputs_j['volume_change_stability_threshold']
 
         args = (code, structure, protocol)
@@ -221,9 +219,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         # loading k-points
         kpoints_distance = inputs_j['kpoints_distance']
         if kpoints_distance:
-            ocv_relax['base']['kpoints_distance'] = orm.Float(0.15)
-            ocv_relax['base_final_scf']['kpoints_distance'] = orm.Float(0.15)
-            scf['kpoints_distance'] = orm.Float(0.15)
+            ocv_relax['base']['kpoints_distance'] = orm.Float(kpoints_distance)
+            ocv_relax['base_final_scf']['kpoints_distance'] = orm.Float(kpoints_distance)
+            scf['kpoints_distance'] = orm.Float(kpoints_distance)
         else:
             kpoints_mesh = inputs_j['kpoints_mesh']
         
@@ -450,8 +448,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         self.ctx.constrained_unitcell = func.get_constrained_charged(self.ctx.discharged_unitcell_relaxed, orm.Str(self.ctx.cation), orm.Float(volume_charged / volume_discharged))
 
         # I make the supercells with same number of non cationic species
-        distance = self.ctx.ocv_parameters_d['distance']
-        discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, distance)
+        discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, self.ctx.ocv_parameters_d['distance'])
         discharged_supercell_relaxed.set_extra('relaxed', True)
         discharged_supercell_relaxed.set_extra('supercell', True)
 

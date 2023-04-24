@@ -3,8 +3,6 @@ default_inputs:
     ocv_parameters:
         cation: 'Li'
         distance: 8.0
-        distance_upperbound: 16.0
-        distance_epsilon: 0.1
         SOC_vc_relax: False # only do atomic relaxation
         SOC_relax_all_supercells: False # use only one of the possible unique supercells for calculation
         DFT_energy_bulk_Li: -195.50930942
