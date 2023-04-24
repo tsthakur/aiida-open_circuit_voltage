@@ -71,7 +71,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             cls.run_relax_charged,
             cls.build_supercells,
             cls.run_relax_low_SOC,
-            # cls.run_relax_constrained_charged,
+            cls.run_relax_constrained_charged,
             cls.run_relax_high_SOC,
             cls.inspect_process,
             cls.results,
@@ -270,7 +270,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             if qb.count():
                 wc = qb.all(flat=True)[-1]
                 self.report(f'Workchain <{wc.pk}> corresponding to bulk cation found')
-                return ToContext(bulk_cation_base_workchains=append_(wc))
+                return ToContext(cation_workchain=append_(wc))
 
             else:
                 inputs = AttributeDict(self.exposed_inputs(PwBaseWorkChain, namespace='scf'))
@@ -283,7 +283,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 running = self.submit(PwBaseWorkChain, **inputs)
 
                 self.report(f'launching PwBaseWorkChain <{running.pk}> on bulk cation structure') 
-                return ToContext(bulk_cation_base_workchains=append_(running))
+                return ToContext(cation_workchain=append_(running))
         else:
             self.report(f'Bulk cation structure not provided, so I will use the input scf energy of {self.ctx.cation}.')
             # I put this context dictionary as none so that the energy can be read from ocv_relax_parameters dictionary
@@ -296,7 +296,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         # Saving the bulk cation DFT energy as context variable
         if self.inputs.get('bulk_cation_structure'):
             try:
-                self.ctx.bulk_cation_d = self.ctx.bulk_cation_base_workchains[-1].outputs.output_parameters
+                self.ctx.bulk_cation_d = self.ctx.cation_workchain[-1].outputs.output_parameters
             except exceptions.NotExistent:
                 self.report('The PwBaseWorkChain did not generate output parameters for bulk cation structure')
                 return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
@@ -315,7 +315,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             if qb.count():
                 wc = qb.all(flat=True)[-1]
                 self.report(f'Workchain <{wc.pk}> corresponding to relaxed discharged unitcell found')
-                return ToContext(relax_workchains=append_(wc))
+                return ToContext(discharged_workchain=append_(wc))
 
             else:
                 inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))['base_final_scf']
@@ -328,7 +328,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 running = self.submit(PwBaseWorkChain, **inputs)
                 self.report(f'launching PwBaseWorkChain <{running.pk}> on relaxed discharged structure')
 
-                return ToContext(relax_workchains=append_(running))
+                return ToContext(discharged_workchain=append_(running))
             
         inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
 
@@ -344,7 +344,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         running = self.submit(PwRelaxWorkChain, **inputs)
         self.report(f'launching PwRelaxWorkChain <{running.pk}> on discharged structure')
-        return ToContext(relax_workchains=append_(running))
+        return ToContext(discharged_workchain=append_(running))
 
     def run_relax_charged(self):
         """
@@ -356,7 +356,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.ctx.discharged_unitcell_relaxed
         except AttributeError:
             try:
-                self.ctx.discharged_unitcell_relaxed = self.ctx.relax_workchains[-1].outputs.output_structure
+                self.ctx.discharged_unitcell_relaxed = self.ctx.discharged_workchain[-1].outputs.output_structure
             except exceptions.NotExistent:
                 self.report('The PwRelaxWorkChains did not generate output structures of discharged unitcell')
                 return self.exit_codes.ERROR_STRUCTURE_NOT_FOUND
@@ -375,7 +375,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             if qb.count():
                 wc = qb.all(flat=True)[-1]
                 self.report(f'Workchain <{wc.pk}> corresponding to relaxed charged unitcell found')
-                return ToContext(relax_workchains=append_(wc))
+                return ToContext(charged_workchain=append_(wc))
 
             else:
                 inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))['base_final_scf']
@@ -391,7 +391,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 running = self.submit(PwBaseWorkChain, **inputs)
                 self.report(f'launching PwBaseWorkChain <{running.pk}> on relaxed charged structure')
 
-                return ToContext(relax_workchains=append_(running))
+                return ToContext(charged_workchain=append_(running))
 
         inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
 
@@ -412,7 +412,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         running = self.submit(PwRelaxWorkChain, **inputs)
         self.report(f'launching PwRelaxWorkChain <{running.pk}> on charged structure')
-        return ToContext(relax_workchains=append_(running))
+        return ToContext(charged_workchain=append_(running))
 
     def build_supercells(self):
         """ 
@@ -423,7 +423,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.ctx.charged_unitcell_relaxed
         except AttributeError:
             try:
-                self.ctx.charged_unitcell_relaxed = self.ctx.relax_workchains[-1].outputs.output_structure
+                self.ctx.charged_unitcell_relaxed = self.ctx.charged_workchain[-1].outputs.output_structure
             except exceptions.NotExistent:
                 self.report('The PwRelaxWorkChains did not generate output structures of charged unitcell')
                 return self.exit_codes.ERROR_STRUCTURE_NOT_FOUND
@@ -472,7 +472,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         """
         if not self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
             self.report('I do not perform low SOC calculations.')
-            self.ctx.relax_workchains.append('dummy_low_SOC_workchain')
             return
 
         inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
@@ -497,7 +496,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         self.report(f'launching PwRelaxWorkChain <{running.pk}>')
         
-        return ToContext(relax_workchains=append_(running))
+        return ToContext(low_SOC_workchain=append_(running))
 
     def run_relax_high_SOC(self):
         """
@@ -506,7 +505,6 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         """
         if not self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
             self.report('I do not perform high SOC calculations.')
-            self.ctx.relax_workchains.append('dummy_high_SOC_workchain')
             return
         
         inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
@@ -531,24 +529,24 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         self.report(f'launching PwRelaxWorkChain <{running.pk}>')
         
-        return ToContext(relax_workchains=append_(running))
-        
+        return ToContext(high_SOC_workchain=append_(running))
+
     def inspect_process(self):
         """
         Inspects the workchains to see if all the required energies are properly calculated at various states of charge.
         """
         try:
             if self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
-                self.ctx.low_SOC_d = self.ctx.relax_workchains[-3].outputs.output_parameters
-                self.ctx.low_SOC_supercell_relaxed = self.ctx.relax_workchains[-3].outputs.output_structure
+                self.ctx.low_SOC_d = self.ctx.low_SOC_workchain[-1].outputs.output_parameters
+                self.ctx.low_SOC_supercell_relaxed = self.ctx.low_SOC_workchain[-1].outputs.output_structure
             else:
                 self.ctx.low_SOC_d = None
                 self.ctx.low_SOC_supercell_relaxed = None
             if self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
-                self.ctx.high_SOC_d = self.ctx.relax_workchains[-1].outputs.output_parameters
-                self.ctx.high_SOC_supercell_relaxed = self.ctx.relax_workchains[-1].outputs.output_structure
-                self.ctx.constrained_charged_d = self.ctx.relax_workchains[-2].outputs.output_parameters
-                self.ctx.constrained_charged_relaxed = self.ctx.relax_workchains[-2].outputs.output_structure
+                self.ctx.high_SOC_d = self.ctx.high_SOC_workchain[-1].outputs.output_parameters
+                self.ctx.high_SOC_supercell_relaxed = self.ctx.high_SOC_workchain[-1].outputs.output_structure
+                self.ctx.constrained_charged_d = self.ctx.constrained_charged_workchain[-1].outputs.output_parameters
+                self.ctx.constrained_charged_relaxed = self.ctx.constrained_charged_workchain[-1].outputs.output_structure
             else:
                 self.ctx.high_SOC_d = None
                 self.ctx.high_SOC_supercell_relaxed = None
@@ -558,8 +556,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.report('the PwRelaxWorkChains did not generate output parameters/structures')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
         try:
-            self.ctx.charged_d = self.ctx.relax_workchains[-4].outputs.output_parameters
-            self.ctx.discharged_d = self.ctx.relax_workchains[-5].outputs.output_parameters
+            self.ctx.charged_d = self.ctx.charged_workchain[-1].outputs.output_parameters
+            self.ctx.discharged_d = self.ctx.discharged_workchain[-1].outputs.output_parameters
         except AttributeError:
             self.report('the PwBaseWorkChains did not generate output parameters for charged and discharged structures')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
@@ -573,4 +571,3 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         self.out('open_circuit_voltages', ocv)
         json_out = func.get_json_outputs(ocv, self.ctx.discharged_unitcell_relaxed, self.ctx.charged_unitcell_relaxed, self.ctx.constrained_charged_relaxed, self.ctx.low_SOC_supercell_relaxed, self.ctx.high_SOC_supercell_relaxed)
         self.out('common_workflow_output', json_out)
-
