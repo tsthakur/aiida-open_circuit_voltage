@@ -498,6 +498,38 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         
         return ToContext(low_SOC_workchain=append_(running))
 
+    def run_relax_constrained_charged(self):
+        """
+        Runs a PwRelaxWorkChain to relax the constrained charged unitcell with no cations.
+        """
+        if not self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
+            self.report('I do not perform constrained charged calculations.')
+            return
+        
+        inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
+        inputs['structure'] = self.ctx.constrained_unitcell
+
+        ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
+        inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
+
+        if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
+            inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
+            inputs.base.pw.parameters.pop('CELL')
+
+        # Removing cation pseudopotential since this structure no longer has any cation in it
+        inputs['base']['pw']['pseudos'].pop(self.ctx.cation)
+        inputs['base_final_scf']['pw']['pseudos'].pop(self.ctx.cation)
+
+        inputs.metadata.call_link_label = 'constrained_charged_relax'
+        inputs.metadata.label = 'constrained_charged_relax'
+
+        inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
+
+        running = self.submit(PwRelaxWorkChain, **inputs)
+        self.report(f'launching PwRelaxWorkChain <{running.pk}>')
+        
+        return ToContext(constrained_charged_workchain=append_(running))
+
     def run_relax_high_SOC(self):
         """
         Runs a PwRelaxWorkChain to relax the supercells with only one cation remaining.
