@@ -445,7 +445,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 self.report(f'Volume change <{volume_change}> is within the threshold <{threshold}>')
 
         # I make the constrained unitcell and store it as context variable
-        self.ctx.constrained_unitcell = func.get_constrained_charged(self.ctx.discharged_unitcell_relaxed, orm.Str(self.ctx.cation), orm.Float(volume_charged / volume_discharged))
+        self.ctx.constrained_unitcell = func.get_constrained_charged(self.ctx.discharged_unitcell_relaxed, orm.Str(self.ctx.cation), orm.Float(volume_charged))
 
         # I make the supercells with same number of non cationic species
         discharged_supercell_relaxed = func.make_supercell(self.ctx.discharged_unitcell_relaxed, self.ctx.ocv_parameters_d['distance'])
@@ -457,9 +457,11 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         # I make the low and high SOC supercells and store the dictionray of structures as context variables
         self.ctx.low_SOC_supercells_d = func.get_low_SOC(discharged_supercell_relaxed, unique_cation_indices) 
-        ## scaling the discharged supercell wrt volume ratio
+        # the new volume of the high_SOC supercell, based on the scaling factor i.e. the volume ratio 
         scaling_factor = volume_charged / volume_discharged
-        self.ctx.high_SOC_supercells_d = func.get_high_SOC(discharged_supercell_relaxed, orm.Float(scaling_factor), all_cation_indices, unique_cation_indices)
+        new_volume = scaling_factor * discharged_supercell_relaxed.get_cell_volume()
+        # I scale the discharged supercell wrt volume ratio to get a supercell with the same proportional volume as the charged unitcell
+        self.ctx.high_SOC_supercells_d = func.get_high_SOC(discharged_supercell_relaxed, orm.Float(new_volume), all_cation_indices, unique_cation_indices)
 
         return
 
