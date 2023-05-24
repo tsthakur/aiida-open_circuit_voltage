@@ -37,12 +37,14 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
     Low SOC
     make list of supercells after removing 1 (symmetery inequivalent) cation
-    based on user input either do fixed cell relax of one such supercell or do fixed cell relax of all unique supercells and take the lowest formation energy
+    based on user input either do fixed cell relax of one such supercell or do fixed cell relax of all unique 
+    supercells and take the lowest formation energy
 
     High SOC
     scale the discharged supercell with the lattice vectors of charged supercell and remove all but 1 cation
     make list of sypercells after leaving 1 (symmetery inequivalent) cation
-    based on user input either do fixed cell relax of one such supercell or do fixed cell relax of all unique supercells and take the lowest formation energy
+    based on user input either do fixed cell relax of one such supercell or do fixed cell relax of all unique 
+    supercells and take the lowest formation energy
     """
 
     @classmethod
@@ -473,29 +475,48 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.report('I do not perform low SOC calculations.')
             return
 
-        inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
-        
-        ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
-        inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
-
         if self.ctx.ocv_parameters_d['SOC_relax_all_supercells']:
-            raise NotImplementedError('Relaxing all low SOC supercells is not implemented yet')
+            # Run the workchainsfor each of the structures and append them together in the context
+            for idx, (key, low_structure) in enumerate(self.ctx.low_SOC_supercells_d.items()):
+
+                ## I should to reload inputs for every iteration
+                inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
+                ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
+                inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
+
+                inputs['structure'] = low_structure
+
+                if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
+                    inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
+                    inputs.base.pw.parameters.pop('CELL')
+
+                inputs.metadata.call_link_label = f'low_SOC_{idx:02d}_relax'
+                inputs.metadata.label = f'low_SOC_{idx:02d}_relax'
+
+                inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
+                running = self.submit(PwRelaxWorkChain, **inputs)
+                self.report(f'launching PwRelaxWorkChain <{running.pk}> on low SOC structure <{low_structure.pk}>')
+
+                self.to_context(low_SOC_workchains=append_(running))
+
         else:
+            inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
+            inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
             inputs['structure'] = self.ctx.low_SOC_supercells_d['low_SOC_structure_00']
 
-        if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
-            inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
-            inputs.base.pw.parameters.pop('CELL')
+            if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
+                inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
+                inputs.base.pw.parameters.pop('CELL')
 
-        inputs.metadata.call_link_label = 'low_SOC_relax'
-        inputs.metadata.label = 'low_SOC_relax'
+            inputs.metadata.call_link_label = 'low_SOC_relax'
+            inputs.metadata.label = 'low_SOC_relax'
 
-        inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
-        running = self.submit(PwRelaxWorkChain, **inputs)
+            inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
+            running = self.submit(PwRelaxWorkChain, **inputs)
 
-        self.report(f'launching PwRelaxWorkChain <{running.pk}>')
-        
-        return ToContext(low_SOC_workchain=append_(running))
+            self.report(f'launching PwRelaxWorkChain <{running.pk}>')
+            
+            return ToContext(low_SOC_workchains=append_(running))
 
     def run_relax_constrained_charged(self):
         """
@@ -532,73 +553,97 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
     def run_relax_high_SOC(self):
         """
         Runs a PwRelaxWorkChain to relax the supercells with only one cation remaining.
-        To do - run this relax chain in parallel with previous one.
+        TODO - run this relax chain in parallel with previous one.
         """
         if not self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
             self.report('I do not perform high SOC calculations.')
             return
-        
-        inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
-                
-        ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
-        inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
 
         if self.ctx.ocv_parameters_d['SOC_relax_all_supercells']:
-            raise NotImplementedError('Relaxing all high SOC supercells is not implemented yet')
+            # Run the workchainsfor each of the structures and append them together in the context
+            for idx, (key, high_structure) in enumerate(self.ctx.high_SOC_supercells_d.items()):
+
+                ## I should to reload inputs for every iteration
+                inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))
+                ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
+                inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
+
+                inputs['structure'] = high_structure
+
+                if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
+                    inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
+                    inputs.base.pw.parameters.pop('CELL')
+
+                inputs.metadata.call_link_label = f'high_SOC_{idx:02d}_relax'
+                inputs.metadata.label = f'high_SOC_{idx:02d}_relax'
+
+                inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
+                running = self.submit(PwRelaxWorkChain, **inputs)
+                self.report(f'launching PwRelaxWorkChain <{running.pk}> on high SOC structure <{high_structure.pk}>')
+
+                self.to_context(high_SOC_workchains=append_(running))
+
         else:
+            inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace='ocv_relax'))                  
+            inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
             inputs['structure'] = self.ctx.high_SOC_supercells_d['high_SOC_structure_00']
 
-        if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
-            inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
-            inputs.base.pw.parameters.pop('CELL')
+            if not self.ctx.ocv_parameters_d['SOC_vc_relax']:
+                inputs.base.pw.parameters['CONTROL']['calculation'] = 'relax'
+                inputs.base.pw.parameters.pop('CELL')
 
-        inputs.metadata.call_link_label = 'high_SOC_relax'
-        inputs.metadata.label = 'high_SOC_relax'
+            inputs.metadata.call_link_label = 'high_SOC_relax'
+            inputs.metadata.label = 'high_SOC_relax'
 
-        inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
-        running = self.submit(PwRelaxWorkChain, **inputs)
+            inputs = prepare_process_inputs(PwRelaxWorkChain, inputs)
+            running = self.submit(PwRelaxWorkChain, **inputs)
 
-        self.report(f'launching PwRelaxWorkChain <{running.pk}>')
-        
-        return ToContext(high_SOC_workchain=append_(running))
+            self.report(f'launching PwRelaxWorkChain <{running.pk}>')
+            
+            return ToContext(high_SOC_workchains=append_(running))
 
     def inspect_process(self):
         """
         Inspects the workchains to see if all the required energies are properly calculated at various states of charge.
+        TODO - compare here the energies of low SOCs and pass the one with lowest energy
         """
         try:
             if self.ctx.ocv_parameters_d['do_low_SOC_OCV']:
-                self.ctx.low_SOC_d = self.ctx.low_SOC_workchain[-1].outputs.output_parameters
-                self.ctx.low_SOC_supercell_relaxed = self.ctx.low_SOC_workchain[-1].outputs.output_structure
+                ## I check and find the dictionary with the lowest energy from the outputs generated by relaxing structures
+                ## corresponding to each of the low SOC structures and store them in context variable
+                low_SOC_dicts = {f'low_SOC_outputs_{idx+1:02d}': workchain.outputs.output_parameters for idx, workchain in enumerate(self.ctx.low_SOC_workchains)}
+                self.ctx.low_SOC_dict = func.get_lowest_energy(**low_SOC_dicts)
+                self.ctx.low_SOC_supercells_relaxed = {f'low_SOC_structure_{idx+1:02d}': workchain.outputs.output_structure for idx, workchain in enumerate(self.ctx.low_SOC_workchains)}
             else:
-                self.ctx.low_SOC_d = None
-                self.ctx.low_SOC_supercell_relaxed = None
+                self.ctx.low_SOC_dict = None
+                self.ctx.low_SOC_supercells_relaxed = None
             if self.ctx.ocv_parameters_d['do_high_SOC_OCV']:
-                self.ctx.high_SOC_d = self.ctx.high_SOC_workchain[-1].outputs.output_parameters
-                self.ctx.high_SOC_supercell_relaxed = self.ctx.high_SOC_workchain[-1].outputs.output_structure
+                high_SOC_dicts = {f'high_SOC_outputs_{idx+1:02d}': workchain.outputs.output_parameters for idx, workchain in enumerate(self.ctx.high_SOC_workchains)}
+                self.ctx.high_SOC_dict = func.get_lowest_energy(**high_SOC_dicts)
+                self.ctx.high_SOC_supercells_relaxed = {f'high_SOC_structure_{idx+1:02d}': workchain.outputs.output_structure for idx, workchain in enumerate(self.ctx.high_SOC_workchains)}
                 self.ctx.constrained_charged_d = self.ctx.constrained_charged_workchain[-1].outputs.output_parameters
                 self.ctx.constrained_charged_relaxed = self.ctx.constrained_charged_workchain[-1].outputs.output_structure
             else:
-                self.ctx.high_SOC_d = None
-                self.ctx.high_SOC_supercell_relaxed = None
+                self.ctx.high_SOC_dict = None
+                self.ctx.high_SOC_supercells_relaxed = None
                 self.ctx.constrained_charged_d = None
                 self.ctx.constrained_charged_relaxed = None
         except exceptions.NotExistent:
-            self.report('the PwRelaxWorkChains did not generate output parameters/structures')
+            self.report('the high/low SOC PwRelaxWorkChains did not generate output parameters/structures')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
         try:
             self.ctx.charged_d = self.ctx.charged_workchain[-1].outputs.output_parameters
             self.ctx.discharged_d = self.ctx.discharged_workchain[-1].outputs.output_parameters
         except AttributeError:
-            self.report('the PwBaseWorkChains did not generate output parameters for charged and discharged structures')
+            self.report('the charged/discharged PwBaseWorkChains did not generate output parameters for charged and discharged structures')
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
 
     def results(self):
         """
         Returns the OCVs at various states of charge and outputs the dictionary based on the common workflow standards.
         """
-        ocv = func.get_OCVs(self.inputs.ocv_parameters, self.ctx.discharged_d, self.ctx.charged_d, self.ctx.constrained_charged_d, self.ctx.low_SOC_d, self.ctx.high_SOC_d, self.ctx.bulk_cation_d)
+        ocv = func.get_OCVs(self.inputs.ocv_parameters, self.ctx.discharged_d, self.ctx.charged_d, self.ctx.bulk_cation_d, self.ctx.constrained_charged_d, self.ctx.low_SOC_dict, self.ctx.high_SOC_dict)
         self.report(f'Open circuit voltages calculated and outputed in <{ocv.id}>')
         self.out('open_circuit_voltages', ocv)
-        json_out = func.get_json_outputs(ocv, self.ctx.discharged_unitcell_relaxed, self.ctx.charged_unitcell_relaxed, self.ctx.constrained_charged_relaxed, self.ctx.low_SOC_supercell_relaxed, self.ctx.high_SOC_supercell_relaxed)
+        json_out = func.get_json_outputs(ocv, self.ctx.discharged_unitcell_relaxed, self.ctx.charged_unitcell_relaxed, self.ctx.constrained_charged_relaxed, self.ctx.low_SOC_supercells_relaxed, self.ctx.high_SOC_supercells_relaxed)
         self.out('common_workflow_output', json_out)

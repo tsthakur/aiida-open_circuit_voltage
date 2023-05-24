@@ -1,8 +1,24 @@
 # -*- coding: utf-8 -*-
 
 from aiida import orm
-from aiida.engine import calcfunction
+from aiida.engine import calcfunction, workfunction
 import numpy as np
+
+@workfunction
+def get_lowest_energy(**kwargs):
+    """This workfunction takes output dictionaries of PwRelaxWorkChains
+    and returns the one with lowest energy"""
+    min_energy = None
+    for key, val in kwargs.items():
+        energy = val['energy']
+        if min_energy is None:
+            min_energy = energy
+            result = val
+        if energy < min_energy:
+            min_energy = energy
+            result = val
+        
+    return result
 
 @calcfunction
 def get_unique_cation_sites(structure, cation):
@@ -104,7 +120,7 @@ def get_low_SOC_slow(structure, cation):
     for struct in unique_low_SOC_structures:
         decationised_structure = orm.StructureData()
         decationised_structure.set_extra('original_unitcell', structure.extras['original_unitcell'])
-        decationised_structure.set_extra('structure_type', 'high_SOC')
+        decationised_structure.set_extra('structure_type', 'low_SOC')
         decationised_structure.set_extra('missing_cations', 1)
         decationised_structure.set_ase(struct)
         decationised_structure.label = decationised_structure.get_formula(mode='count')
@@ -265,17 +281,17 @@ def get_structuredata_from_optimade(structure, load_from_uuid=orm.Bool(False)):
     return structure_aiida
 
 @calcfunction
-def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter, constrained_charged_ouput_parameter=None, low_SOC_ouput_parameter=None, high_SOC_ouput_parameter=None, bulk_cation_scf_output=None):
+def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter, bulk_cation_scf_output=None, constrained_charged_ouput_parameter=None, low_SOC_ouput_parameter=None, high_SOC_ouput_parameter=None):
     """
     Take the output parameters containing DFT energies and calculated the OCV. 
     structure containing no cations
     :param discharged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``discharged`` structure.
     :param charged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``charged`` structure.
-    :param constrained_charged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``constrained_charged`` structure.
-    :param low_SOC_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``low state of charge`` structure.
-    :param high_SOC_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``high state of charge`` structure.
-    :param ocv_parameters: the ``Dictionary`` instance used within the OCVWorkChain.
     :param bulk_cation_scf_output: the optional ``Dictionary`` instance output of the ``PwBaseWorkChain`` run on ``bulk cation`` structure, if this is not provided the energy values are read
+    :param constrained_charged_ouput_parameter: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``constrained_charged`` structure.
+    :param low_SOC_ouput_parameters: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``low state of charge`` structure.
+    :param high_SOC_ouput_parameters: the ``Dictionary`` instance output of the ``PwRelaxWorkChain`` run on ``high state of charge`` structure.
+    :param ocv_parameters: the ``Dictionary`` instance used within the OCVWorkChain.
     from the ocv_parameters.
     """
     from aiida.plugins import WorkflowFactory
@@ -300,6 +316,7 @@ def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter
         constrained_d = constrained_charged_ouput_parameter.get_dict()
         # Loading the high SOC structure
         high_SOC_supercell = high_SOC_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
+        high_SOC_supercell.set_extra('missing_cations', 15)
         total_cations_supercell = high_SOC_supercell.extras['missing_cations'] + 1
 
     if bulk_cation_scf_output:
@@ -336,12 +353,12 @@ def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter
     # x2-x1 = all Li atoms in the discharged unitcell in this case
     V_average = ((charged_d['energy'] - discharged_d['energy'] + total_cations_unitcell * cation_energy) ) / (z * total_cations_unitcell)
 
-    ocv = orm.Dict(dict={'OCV_average': V_average, 'OCV_low_OCV': V_low_SOC, 'OCV_high_SOC': V_high_SOC, 'OCV_units': 'V'})
+    ocv = orm.Dict(dict={'OCV_average': V_average, 'OCV_low_SOC': V_low_SOC, 'OCV_high_SOC': V_high_SOC, 'OCV_units': 'V'})
     
     return ocv
 
 @calcfunction
-def get_json_outputs(ocv, discharged_structure, charged_structure, constrained_charged_structure=None, low_SOC_structure=None, high_SOC_structure=None, meta=None, optional_outputs=None):
+def get_json_outputs(ocv, discharged_structure, charged_structure, constrained_charged_structure=None, low_SOC_structures=None, high_SOC_structures=None, meta=None, optional_outputs=None):
     """
     Take the output parameters containing DFT energies and calculated the OCV. 
     structure containing no cations
@@ -349,25 +366,23 @@ def get_json_outputs(ocv, discharged_structure, charged_structure, constrained_c
     :param discharged_structure: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``discharged`` structure, i.e. the relaxed discharged structure.
     :param charged_structure: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``charged`` structure, i.e. the relaxed charged structure.
     :param constrained_charged_structure: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``constrained`` structure, i.e. the relaxed constrained charged structure.
-    :param low_SOC_ouput_parameter: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``low state of charge`` structure, i.e. the relaxed low SOC structure.
-    :param high_SOC_ouput_parameter: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``high state of charge`` structure, i.e. the relaxed high SOC structure.
+    :param low_SOC_structure: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``low state of charge`` structure, i.e. the relaxed low SOC structure.
+    :param high_SOC_structure: the ``StructureData`` instance output of the ``PwRelaxWorkChain`` run on ``high state of charge`` structure, i.e. the relaxed high SOC structure.
     :param meta: the ``Dictionary`` instance used to output any ``meta`` outputs.
     :param optional_outputs: the ``Dictionary`` instance used to output any other remaining outputs like forces, stresses etc.
     """
 
-    from aiida_open_circuit_voltage.calculations.functions import functions as func
+    discharged_structure_o = get_optimade(discharged_structure).get_dict()
+    charged_structure_o = get_optimade(charged_structure).get_dict()
 
-    discharged_structure_o = func.get_optimade(discharged_structure).get_dict()
-    charged_structure_o = func.get_optimade(charged_structure).get_dict()
-
-    if low_SOC_structure:
-        low_SOC_structure_o = {"low_SOC_structure_01": get_optimade(low_SOC_structure).get_dict()}
+    if low_SOC_structures:
+        low_SOC_structure_o = {key: get_optimade(low_SOC_structure).get_dict() for key, low_SOC_structure in low_SOC_structures.items()}
     else:
         low_SOC_structure_o = {"low_SOC_structure_01": None}
 
-    if high_SOC_structure:
-        high_SOC_structure_o = {"high_SOC_structure_01": get_optimade(high_SOC_structure).get_dict()}
-        constrained_charged_structure_o = func.get_optimade(constrained_charged_structure).get_dict()
+    if high_SOC_structures:
+        high_SOC_structure_o = {key: get_optimade(high_SOC_structure).get_dict() for key, high_SOC_structure in high_SOC_structures.items()}
+        constrained_charged_structure_o = get_optimade(constrained_charged_structure).get_dict()
     else:
         high_SOC_structure_o = {"high_SOC_structure_01": None}
         constrained_charged_structure_o = None
