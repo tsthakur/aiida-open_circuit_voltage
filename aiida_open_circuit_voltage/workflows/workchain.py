@@ -645,5 +645,16 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         ocv = func.get_OCVs(self.inputs.ocv_parameters, self.ctx.discharged_d, self.ctx.charged_d, self.ctx.bulk_cation_d, self.ctx.constrained_charged_d, self.ctx.low_SOC_dict, self.ctx.high_SOC_dict)
         self.report(f'Open circuit voltages calculated and outputed in <{ocv.id}>')
         self.out('open_circuit_voltages', ocv)
-        json_out = func.get_json_outputs(ocv, self.ctx.discharged_unitcell_relaxed, self.ctx.charged_unitcell_relaxed, self.ctx.constrained_charged_relaxed, self.ctx.low_SOC_supercells_relaxed, self.ctx.high_SOC_supercells_relaxed)
+
+        if self.ctx.low_SOC_supercells_relaxed:
+            low_SOC_structures = func.get_optimade_structures(**self.ctx.low_SOC_supercells_relaxed)
+        else: 
+            low_SOC_structures = None
+
+        if self.ctx.high_SOC_supercells_relaxed:
+            high_SOC_structures = func.get_optimade_structures(**self.ctx.high_SOC_supercells_relaxed)
+        else: 
+            high_SOC_structures = None
+
+        json_out = func.get_json_outputs(ocv, self.ctx.discharged_unitcell_relaxed, self.ctx.charged_unitcell_relaxed, self.ctx.constrained_charged_relaxed, low_SOC_structures, high_SOC_structures)
         self.out('common_workflow_output', json_out)

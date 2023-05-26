@@ -358,6 +358,16 @@ def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter
     return ocv
 
 @calcfunction
+def get_optimade_structures(**kwargs):
+    """
+    Take in a dictionary containing AiiDA StructureData instances and returns a single dictionary containing those structures
+    in optimade format.
+    """
+    structure_o = {key: get_optimade(structure).get_dict() for key, structure in kwargs.items()}
+    structures_dict = orm.Dict(dict=structure_o)
+    return structures_dict
+
+@calcfunction
 def get_json_outputs(ocv, discharged_structure, charged_structure, constrained_charged_structure=None, low_SOC_structures=None, high_SOC_structures=None, meta=None, optional_outputs=None):
     """
     Take the output parameters containing DFT energies and calculated the OCV. 
@@ -376,12 +386,12 @@ def get_json_outputs(ocv, discharged_structure, charged_structure, constrained_c
     charged_structure_o = get_optimade(charged_structure).get_dict()
 
     if low_SOC_structures:
-        low_SOC_structure_o = {key: get_optimade(low_SOC_structure).get_dict() for key, low_SOC_structure in low_SOC_structures.items()}
+        low_SOC_structure_o = low_SOC_structures.get_dict()
     else:
         low_SOC_structure_o = {"low_SOC_structure_01": None}
 
     if high_SOC_structures:
-        high_SOC_structure_o = {key: get_optimade(high_SOC_structure).get_dict() for key, high_SOC_structure in high_SOC_structures.items()}
+        high_SOC_structure_o = high_SOC_structures.get_dict()
         constrained_charged_structure_o = get_optimade(constrained_charged_structure).get_dict()
     else:
         high_SOC_structure_o = {"high_SOC_structure_01": None}
