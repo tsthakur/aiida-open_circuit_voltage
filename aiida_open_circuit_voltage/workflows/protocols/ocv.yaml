@@ -4,10 +4,10 @@ default_inputs:
         cation: 'Li'
         distance: 8.0
         SOC_vc_relax: False # only do atomic relaxation
-        SOC_relax_all_supercells: False # use only one of the possible unique supercells for calculation
-        DFT_energy_bulk_Li: -195.50930942
-        DFT_energy_bulk_Mg: -457.37824385
-        energy_units: 'eV'
+        SOC_relax_all_supercells: True # use only one of the possible unique supercells for calculation
+        DFT_energy_bulk_Li: -195.51818103
+        DFT_energy_bulk_Mg: -445.17879624
+        energy_units: 'V'
         volume_change_stability_threshold: 0.1
         volume_change_stability: True
         do_high_SOC_OCV: True # if false the OCV at high SOC is not calculated and neither the high SOC supercell relaxed 
