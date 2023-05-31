@@ -20,6 +20,15 @@ def get_lowest_energy(**kwargs):
         
     return result
 
+def get_cations_in_structure(structure, cation):
+    '''
+    Returns the no. of cations in a structure 
+    '''
+    structure_pym = structure.get_pymatgen_structure()
+    cation_sites = [site for site in structure_pym.sites if site.species_string == cation]
+    
+    return {'no_of_cations': len(cation_sites)}
+
 @calcfunction
 def get_unique_cation_sites(structure, cation):
     '''
@@ -300,24 +309,24 @@ def get_OCVs(ocv_parameters, discharged_ouput_parameter, charged_ouput_parameter
     discharged_d = discharged_ouput_parameter.get_dict()
     charged_d = charged_ouput_parameter.get_dict()
 
-    # Loading the charged structure
-    charged_unitcell = charged_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
-    total_cations_unitcell = charged_unitcell.extras['missing_cations']
+    # Loading the discharged structure
+    discharged_unitcell = discharged_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
+    total_cations_unitcell = get_cations_in_structure(discharged_unitcell, ocv_parameters_d['cation'])['no_of_cations']
 
     if low_SOC_ouput_parameter:
         low_SOC_d = low_SOC_ouput_parameter.get_dict()
         low_SOC_supercell = low_SOC_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
-        low_SOC_ss_ase = low_SOC_supercell.get_ase()
-        cations_indices_low = [atom.index for atom in low_SOC_ss_ase if atom.symbol == ocv_parameters_d['cation']]
-        total_cations_supercell = len(cations_indices_low) + 1
+        total_cations_supercell = get_cations_in_structure(low_SOC_supercell, ocv_parameters_d['cation'])['no_of_cations'] + 1
 
     if high_SOC_ouput_parameter:
         high_SOC_d = high_SOC_ouput_parameter.get_dict()
         constrained_d = constrained_charged_ouput_parameter.get_dict()
         # Loading the high SOC structure
         high_SOC_supercell = high_SOC_ouput_parameter.get_incoming(WorkflowFactory('quantumespresso.pw.relax')).all_nodes()[-1].inputs['structure']
-        high_SOC_supercell.set_extra('missing_cations', 15)
-        total_cations_supercell = high_SOC_supercell.extras['missing_cations'] + 1
+        # Since this supercell has only 1 atom, I need to query the main supercell it was constructed from to
+        # count the no. of cations in supercell
+        supercell = high_SOC_supercell.get_incoming().all_nodes()[0].get_incoming(orm.StructureData).all_nodes()[0]        
+        total_cations_supercell = get_cations_in_structure(supercell, ocv_parameters_d['cation'])['no_of_cations']
 
     if bulk_cation_scf_output:
         bulk_cation_d = bulk_cation_scf_output.get_dict()
