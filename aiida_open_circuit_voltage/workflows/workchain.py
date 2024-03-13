@@ -476,7 +476,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             return
 
         if self.ctx.ocv_parameters_d['SOC_relax_all_supercells']:
-            # Run the workchainsfor each of the structures and append them together in the context
+            # Run the workchains for each of the structures and append them together in the context
             for idx, (key, low_structure) in enumerate(self.ctx.low_SOC_supercells_d.items()):
 
                 ## I should to reload inputs for every iteration
@@ -560,7 +560,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             return
 
         if self.ctx.ocv_parameters_d['SOC_relax_all_supercells']:
-            # Run the workchainsfor each of the structures and append them together in the context
+            # Run the workchains for each of the structures and append them together in the context
             for idx, (key, high_structure) in enumerate(self.ctx.high_SOC_supercells_d.items()):
 
                 ## I should to reload inputs for every iteration

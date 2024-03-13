@@ -265,7 +265,11 @@ def get_structuredata_from_optimade(structure, load_from_uuid=orm.Bool(False)):
 
     structure_aiida = orm.StructureData()
 
-    uuid = structure_d['immutable_id']
+    try:
+        uuid = structure_d['immutable_id']
+    except KeyError:
+        uuid = False
+        
     if uuid and load_from_uuid:
         try:
             structure_aiida = orm.load_node(uuid)
