@@ -8,7 +8,7 @@
   "requires": {
     ">=0.1": [
       "aiida-core~=1.6",
-      "aiida-quantumespresso~=3.4",
+      "aiida-quantumespresso~=3.4"
     ]
   }
 }

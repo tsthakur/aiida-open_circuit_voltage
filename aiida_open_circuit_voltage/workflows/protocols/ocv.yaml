@@ -5,15 +5,15 @@ default_inputs:
         distance: 8.0
         SOC_vc_relax: False # only do atomic relaxation
         SOC_relax_all_supercells: False # use only one of the possible unique supercells for calculation
-        DFT_energy_bulk_Li: -195.50930942
-        DFT_energy_bulk_Mg: -457.37824385
-        energy_units: 'eV'
+        DFT_energy_bulk_Li: -195.51818103
+        DFT_energy_bulk_Mg: -445.17879624
+        energy_units: 'V'
         volume_change_stability_threshold: 0.1
         volume_change_stability: True
         do_high_SOC_OCV: True # if false the OCV at high SOC is not calculated and neither the high SOC supercell relaxed 
         do_low_SOC_OCV: True # if false the OCV at low SOC is not calculated and neither the low SOC supercell relaxed 
     ocv_relax:
-        pseudo_family: 'SSSP/1.1.2/PBEsol/efficiency'
+        pseudo_family: 'SSSP/1.3/PBEsol/efficiency'
 
 default_protocol: moderate
 protocols:
@@ -22,11 +22,11 @@ protocols:
     precise:
         description: 'Protocol to perform the computation at high precision at higher computational cost.'
         ocv_parameters:
-            cation: 'Li'
-            distance: 12.0
+            distance: 9.0
             SOC_vc_relax: True # do complete vc-relax
             SOC_relax_all_supercells: True # use all unique supercells and consider the most stable one for ocv calculations
         ocv_relax: 
+            pseudo_family: 'SSSP/1.3/PBEsol/precision'
             volume_convergence: 0.01
             base:
                 kpoints_distance: 0.10
@@ -55,18 +55,18 @@ protocols:
             SOC_relax_all_supercells: False # use only one of the unique supercells for calculation
             volume_change_stability: False
         ocv_relax: 
-            volume_convergence: 0.1
+            volume_convergence: 0.05
             base:
-                kpoints_distance: 0.75
+                kpoints_distance: 0.5
                 meta_parameters:
-                    conv_thr_per_atom: 1.e-8
-                    etot_conv_thr_per_atom: 1.e-3
+                    conv_thr_per_atom: 4.e-9
+                    etot_conv_thr_per_atom: 1.e-4
                 pw:
                     parameters:
                         CONTROL:
-                            forc_conv_thr: 5.e-3
+                            forc_conv_thr: 1.e-3
             base_final_scf:
-                kpoints_distance: 0.50
+                kpoints_distance: 0.5
                 meta_parameters:
                     conv_thr_per_atom: 4.e-9
                     etot_conv_thr_per_atom: 1.e-4
