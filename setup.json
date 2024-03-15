@@ -1,5 +1,5 @@
 {
-    "version": "0.1.0",
+    "version": "0.2.0",
     "name": "aiida-open_circuit_voltage",
     "url": "https://github.com/tsthakur/aiida-open_circuit_voltage",
     "license": "MIT License",
@@ -10,14 +10,15 @@
         "Framework :: AiiDA",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python",
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
         "Natural Language :: English",
         "Intended Audience :: Science/Research"
     ],
     "include_package_data": true,
     "reentry_register": true,
     "install_requires": [
-        "aiida-core>=1.1.0,<2.0.0",
+        "aiida-core>=1.1.0",
+        "aiida-quantumespresso>=3.1",
         "supercellor>=0.0.1"
     ],
     "extras_require": {
@@ -30,7 +31,7 @@
         ],
         "pre-commit": [
             "pre-commit~=2.2",
-            "pylint>=2.5.0,<2.9"
+            "pylint>=2.5.0"
         ],
         "docs": [
             "sphinx",

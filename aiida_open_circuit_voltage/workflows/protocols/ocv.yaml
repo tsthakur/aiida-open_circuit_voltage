@@ -22,7 +22,6 @@ protocols:
     precise:
         description: 'Protocol to perform the computation at high precision at higher computational cost.'
         ocv_parameters:
-            cation: 'Li'
             distance: 9.0
             SOC_vc_relax: True # do complete vc-relax
             SOC_relax_all_supercells: True # use all unique supercells and consider the most stable one for ocv calculations
