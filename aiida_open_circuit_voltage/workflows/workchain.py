@@ -159,6 +159,11 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         # I store cell card as context variable for putting it back if supercells are vc-relaxed
         self.ctx.cell = ocv_relax_inputs.base.pw.parameters.get_dict()["CELL"]
 
+        if ocv_relax_inputs.base.pw.parameters.get_dict()["SYSTEM"].get("starting_magnetization") is None:
+            self.ctx.cation_magentization = False
+        else:
+            self.ctx.cation_magentization = True
+
     @classmethod
     def get_protocol_filepath(cls):
         """
@@ -189,7 +194,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         :param discharged_unitcell_relaxed: the ``StructureData`` instance that has been already relaxed.
         :param charged_unitcell_relaxed: the ``StructureData`` instance that has all the cations removed and has been relaxed.
         :param protocol: protocol to use, if not specified, the default will be used.
-        :param overrides: optional dictionary of inputs to override the defaults of the protocol, usually takes the pseudo potential family and parallelization options.
+        :param overrides: optional dictionary of inputs to override the defaults of the protocol, usually takes the pseudo potential family and parallelisation options.
         :param kwargs: additional keyword arguments that will be passed to the ``get_builder_from_protocol`` of all the
             sub processes that are called by this workchain.
         :return: a process builder instance with all inputs defined ready for launch.
@@ -249,6 +254,12 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         inputs_j = data["inputs"]
         meta_j = data["meta"]
 
+        # loading structures
+        structure = func.get_structuredata_from_optimade(inputs_j["structure"])
+        structure_cation = func.get_structuredata_from_optimade(
+            inputs_j["bulk_cation_structure"]
+        )
+
         # loading parameters
         protocol = inputs_j["protocol"]
         # aiida-quantumespresso uses the keyword moderate so need to change it here
@@ -276,13 +287,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         magnetization_per_site = inputs_j["magnetization_per_site"]
         # need to tell the builder that a list containing 0s means null initial magnetic moments
         if all(mag == 0 for mag in magnetization_per_site):
-            magnetization_per_site = None
-
-        # loading structures
-        structure = func.get_structuredata_from_optimade(inputs_j["structure"])
-        structure_cation = func.get_structuredata_from_optimade(
-            inputs_j["bulk_cation_structure"]
-        )
+            initial_magnetic_moments = None
+        else:
+            initial_magnetic_moments = {kind.name: np.mean([magnetization for magnetization, sites in zip(magnetization_per_site, structure.sites) if sites.kind_name == kind.name]) for kind in structure.kinds}
 
         # other parameters
         inputs["ocv_parameters"]["cation"] = inputs_j["cation"]
@@ -297,7 +304,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             *args,
             overrides=inputs["ocv_relax"],
             spin_type=spin_type,
-            initial_magnetic_moments=magnetization_per_site,
+            initial_magnetic_moments=initial_magnetic_moments,
         )
         scf = PwBaseWorkChain.get_builder_from_protocol(
             *args_cation, overrides=inputs.get("scf", None)
@@ -545,8 +552,15 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 )["base_final_scf"]
                 inputs.pw.structure = self.ctx.charged_unitcell_relaxed
 
+                ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
+                inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
+
                 # Removing cation pseudopotential since this structure no longer has cation in it
                 inputs["pw"]["pseudos"].pop(self.ctx.cation)
+
+                # Removing initial magentisation of cations
+                if self.ctx.cation_magentization:
+                    inputs.base.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
                 inputs.metadata.call_link_label = "charged_scf"
                 inputs.metadata.label = "charged_scf"
 
@@ -571,9 +585,17 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         inputs["structure"] = charged_unitcell
 
+        ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
+        inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
+        inputs.base_final_scf.pw.parameters = inputs.base_final_scf.pw.parameters.get_dict()
+
         # Removing cation pseudopotential since this structure no longer has any cation in it
         inputs["base"]["pw"]["pseudos"].pop(self.ctx.cation)
         inputs["base_final_scf"]["pw"]["pseudos"].pop(self.ctx.cation)
+
+        if self.ctx.cation_magentization:
+            inputs.base.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
+            inputs.base_final_scf.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
 
         inputs.metadata.call_link_label = "charged_relax"
         inputs.metadata.label = "charged_relax"
@@ -737,6 +759,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
         inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
+        inputs.base_final_scf.pw.parameters = inputs.base_final_scf.pw.parameters.get_dict()
 
         if not self.ctx.ocv_parameters_d["SOC_vc_relax"]:
             inputs.base.pw.parameters["CONTROL"]["calculation"] = "relax"
@@ -745,6 +768,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         # Removing cation pseudopotential since this structure no longer has any cation in it
         inputs["base"]["pw"]["pseudos"].pop(self.ctx.cation)
         inputs["base_final_scf"]["pw"]["pseudos"].pop(self.ctx.cation)
+
+        if self.ctx.cation_magentization:
+            inputs.base.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
+            inputs.base_final_scf.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
 
         inputs.metadata.call_link_label = "constrained_charged_relax"
         inputs.metadata.label = "constrained_charged_relax"
