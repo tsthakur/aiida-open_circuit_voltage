@@ -467,8 +467,24 @@ def get_OCVs(
             .all_nodes()[-1]
             .inputs["pw"]["structure"]
         )
-        # I add back the only cation present in the high SOC structure, to get total number of cations in the supercell
-        cation_energy = bulk_cation_d["energy"] / len(bulk_cation_structure.sites)
+        # Using try block to remove smearing energy in case smearing was used
+        try:
+            # I add back the only cation present in the high SOC structure, to get total number of cations in the supercell
+            cation_energy = (bulk_cation_d["energy"] - bulk_cation_d["energy_smearing"])/ len(bulk_cation_structure.sites)
+            discharged_energy = discharged_d["energy"] - discharged_d["energy_smearing"]
+            charged_energy = charged_d["energy"] - charged_d["energy_smearing"]
+            if ocv_parameters_d["do_low_SOC_OCV"]:
+                low_energy = low_SOC_d["energy"] - low_SOC_d["energy_smearing"]
+            if ocv_parameters_d["do_high_SOC_OCV"]:
+                constrained_energy = constrained_d["energy"] - constrained_d["energy_smearing"]
+                high_energy = high_SOC_d["energy"] - high_SOC_d["energy_smearing"]
+        except KeyError:
+            cation_energy = bulk_cation_d["energy"] / len(bulk_cation_structure.sites)
+            discharged_energy = discharged_d["energy"]
+            charged_energy = charged_d["energy"]
+            low_energy = low_SOC_d["energy"]
+            constrained_energy = constrained_d["energy"]
+            high_energy = high_SOC_d["energy"]
     else:
         cation_energy = ocv_parameters_d[
             f'DFT_energy_bulk_{ocv_parameters_d["cation"]}'
@@ -487,9 +503,9 @@ def get_OCVs(
     if ocv_parameters_d["do_low_SOC_OCV"]:
         # x2-x1 = 1 in this case
         V_low_SOC = (
-            low_SOC_d["energy"]
+            low_energy
             - (total_cations_supercell / total_cations_unitcell)
-            * discharged_d["energy"]
+            * discharged_energy
             + 1 * cation_energy
         ) / (z * 1)
     else:
@@ -499,8 +515,8 @@ def get_OCVs(
         # x2-x1 = 1 in this case
         # V_high_SOC = ((total_cations_supercell / total_cations_unitcell) * charged_d['energy'] - high_SOC_d['energy'] + 1 * cation_energy) / (z * 1)
         V_high_SOC = (
-            (total_cations_supercell / total_cations_unitcell) * constrained_d["energy"]
-            - high_SOC_d["energy"]
+            (total_cations_supercell / total_cations_unitcell) * constrained_energy
+            - high_energy
             + 1 * cation_energy
         ) / (z * 1)
     else:
@@ -508,8 +524,8 @@ def get_OCVs(
     # x2-x1 = all Li atoms in the discharged unitcell in this case
     V_average = (
         (
-            charged_d["energy"]
-            - discharged_d["energy"]
+            charged_energy
+            - discharged_energy
             + total_cations_unitcell * cation_energy
         )
     ) / (z * total_cations_unitcell)

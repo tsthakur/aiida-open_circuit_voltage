@@ -160,9 +160,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         self.ctx.cell = ocv_relax_inputs.base.pw.parameters.get_dict()["CELL"]
 
         if ocv_relax_inputs.base.pw.parameters.get_dict()["SYSTEM"].get("starting_magnetization") is None:
-            self.ctx.cation_magentization = False
+            self.ctx.cation_magnetization = False
         else:
-            self.ctx.cation_magentization = True
+            self.ctx.cation_magnetization = True
 
     @classmethod
     def get_protocol_filepath(cls):
@@ -558,8 +558,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 # Removing cation pseudopotential since this structure no longer has cation in it
                 inputs["pw"]["pseudos"].pop(self.ctx.cation)
 
-                # Removing initial magentisation of cations
-                if self.ctx.cation_magentization:
+                # Removing initial magnetization of cations
+                if self.ctx.cation_magnetization:
                     inputs.base.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
                 inputs.metadata.call_link_label = "charged_scf"
                 inputs.metadata.label = "charged_scf"
@@ -593,7 +593,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         inputs["base"]["pw"]["pseudos"].pop(self.ctx.cation)
         inputs["base_final_scf"]["pw"]["pseudos"].pop(self.ctx.cation)
 
-        if self.ctx.cation_magentization:
+        # Removing initial magnetization of cations
+        if self.ctx.cation_magnetization:
             inputs.base.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
             inputs.base_final_scf.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
 
@@ -769,7 +770,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         inputs["base"]["pw"]["pseudos"].pop(self.ctx.cation)
         inputs["base_final_scf"]["pw"]["pseudos"].pop(self.ctx.cation)
 
-        if self.ctx.cation_magentization:
+        # Removing initial magnetization of cations
+        if self.ctx.cation_magnetization:
             inputs.base.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
             inputs.base_final_scf.pw.parameters["SYSTEM"]["starting_magnetization"].pop(self.ctx.cation)
 
