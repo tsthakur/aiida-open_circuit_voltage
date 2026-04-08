@@ -67,7 +67,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             namespace="scf",
             exclude=("clean_workdir", "pw.structure"),
             namespace_options={
-                "help": "Inputs for the `PwBaseWorkChain` for the SCF calculation of bulk cation and for if relaxed charged-discharged unitcells are provided."
+                "help": "Inputs for the `PwBaseWorkChain` for the SCF calculation of bulk cation and for if relaxed charged-discharged unitcells are provided.",
+                "required": False,
+                "populate_defaults": False,
             },
         )
         spec.input(
