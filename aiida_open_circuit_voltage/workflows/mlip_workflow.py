@@ -83,7 +83,7 @@ class MLIPOCVWorkflow:
         cell_filter=None,
         SOC_vc_relax=False,
         SOC_relax_all_supercells=False,
-        volume_change_stability=True,
+        volume_change_stability=False,
         volume_change_stability_threshold=0.1,
     ):
         if cation not in self.SUPPORTED_CATIONS:
@@ -141,27 +141,19 @@ class MLIPOCVWorkflow:
         """
 
         # Step 1: Bulk cation reference energy (single-point)
-        self._log("Step 1: Computing bulk cation reference energy (single-point).")
         cation_energy_per_atom = self._get_cation_energy()
-        self._log(f" - Cation energy per atom: {cation_energy_per_atom:.6f} eV")
 
         # Step 2: Relax discharged unitcell (vc-relax)
-        self._log("Step 2: Relaxing discharged unitcell (vc-relax).")
         discharged_relaxed, E_discharged = self._relax(self.structure, vc_relax=True)
-        self._log(f" - E_discharged = {E_discharged:.6f} eV")
 
         # Step 3: Relax charged unitcell (vc-relax)
-        self._log("Step 3: Relaxing charged unitcell (vc-relax).")
         charged_input = self._remove_cations(self.structure)
         charged_relaxed, E_charged = self._relax(charged_input, vc_relax=True)
-        self._log(f" - E_charged    = {E_charged:.6f} eV")
 
         # Step 4: Mechanical stability check and supercell construction
-        self._log("Step 4: Checking mechanical stability and building supercells.")
         V_discharged = discharged_relaxed.get_volume()
         V_charged = charged_relaxed.get_volume()
         volume_change = (V_charged - V_discharged) / V_discharged
-        self._log(f" - Volume change on charging: {volume_change:+.3%}")
 
         if self.volume_change_stability:
             if abs(volume_change) > self.volume_change_stability_threshold:
@@ -175,14 +167,8 @@ class MLIPOCVWorkflow:
         N_cations_unitcell = sum(1 for a in self.structure if a.symbol == self.cation)
         N_cations_supercell = len(all_indices)
         sc_scale = N_cations_supercell / N_cations_unitcell
-        self._log(
-            f" - Supercell: {len(discharged_supercell)} atoms, "
-            f"{N_cations_supercell} {self.cation} sites, "
-            f"{len(unique_indices)} unique."
-        )
 
         # Step 5: Low SOC
-        self._log("Step 5: Relaxing low-SOC supercell(s) (1 cation removed).")
         low_SOC_structures = self._get_low_SOC_structures(discharged_supercell, unique_indices)
 
         if self.SOC_relax_all_supercells:
@@ -195,7 +181,6 @@ class MLIPOCVWorkflow:
                 low_SOC_structures[0], vc_relax=self.SOC_vc_relax
             )
 
-        self._log(f" - E_low_SOC    = {E_low:.6f} eV")
         # V = [E(x-1) - (N_sc/N_uc)*E(discharged) + E_cation] / z
         OCV_low_SOC = (E_low - sc_scale * E_discharged + cation_energy_per_atom) / self.z
 
@@ -203,15 +188,12 @@ class MLIPOCVWorkflow:
         constrained_charged_relaxed = None
         E_constrained = None
 
-        self._log("Step 6: Relaxing constrained charged unitcell.")
         constrained_input = self._get_constrained_charged(discharged_relaxed, V_charged)
         constrained_charged_relaxed, E_constrained = self._relax(
             constrained_input, vc_relax=self.SOC_vc_relax
         )
-        self._log(f" - E_constrained = {E_constrained:.6f} eV")
 
         # Step 7: High SOC
-        self._log("Step 7: Relaxing high-SOC supercell(s) (1 cation remaining).")
         scaling_factor = V_charged / V_discharged
         new_volume = scaling_factor * discharged_supercell.get_volume()
         high_SOC_structures = self._get_high_SOC_structures(
@@ -228,21 +210,25 @@ class MLIPOCVWorkflow:
                 high_SOC_structures[0], vc_relax=self.SOC_vc_relax
             )
 
-        self._log(f" - E_high_SOC   = {E_high:.6f} eV")
         # V = [(N_sc/N_uc)*E(constrained) - E(x+1) + E_cation] / z
         OCV_high_SOC = (sc_scale * E_constrained - E_high + cation_energy_per_atom) / self.z
 
         # Step 8: Average OCV
-        self._log("Step 8: Computing OCV values.")
         # V = [E(charged) - E(discharged) + N*E_cation] / (z*N)
         OCV_average = (
             E_charged - E_discharged + N_cations_unitcell * cation_energy_per_atom
         ) / (self.z * N_cations_unitcell)
 
-        self._log("\nResults:")
-        self._log(f"OCV average: {OCV_average:+.4f} V")
+        # Step 9: Capacity and energy density (discharged unitcell as reference)
+        energy_density = self._compute_energy_density(
+            discharged_relaxed, N_cations_unitcell, OCV_average
+        )
+
         self._log(f"OCV low SOC: {OCV_low_SOC:+.4f} V")
+        self._log(f"OCV average: {OCV_average:+.4f} V")
         self._log(f"OCV high SOC: {OCV_high_SOC:+.4f} V")
+        self._log(f"Gravimetric energy density: {energy_density['gravimetric_energy_density']:.2f} Wh/kg")
+        self._log(f"Volumetric energy density:  {energy_density['volumetric_energy_density']:.2f} Wh/L")
 
         return {
             "OCV_average": OCV_average,
@@ -254,6 +240,7 @@ class MLIPOCVWorkflow:
             "low_SOC_relaxed": low_SOC_relaxed,
             "high_SOC_relaxed": high_SOC_relaxed,
             "constrained_charged_relaxed": constrained_charged_relaxed,
+            **energy_density,
         }
 
     # Private helpers
@@ -292,6 +279,33 @@ class MLIPOCVWorkflow:
         atoms = self._attach_calculator(self.bulk_cation_structure)
         energy = atoms.get_potential_energy()
         return energy / len(atoms)
+
+    def _compute_energy_density(self, atoms, n_cations, voltage):
+        """
+        Compute theoretical capacity and energy density of a cathode.
+        Uses the relaxed discharged unitcell as the mass/volume reference.
+        """
+        F = 96485.33212        # Faraday constant, C/mol
+        N_A = 6.02214076e23    # Avogadro, 1/mol
+
+        # 1 mAh = 1 mA x 1 hour = 10^-3 A x 3600 s = 3.6 C
+
+        M_cell = atoms.get_masses().sum()      # amu == g/mol
+        V_cell = atoms.get_volume()            # Ang^3
+
+        C_grav = n_cations * self.z * F / (3.6 * M_cell)               # mAh/g
+        C_vol  = n_cations * self.z * F * 1e24 / (3.6 * N_A * V_cell)  # mAh/cm^3
+        E_grav = voltage * C_grav                                      # Wh/kg
+        E_vol  = voltage * C_vol                                       # Wh/L
+
+        return {
+            "gravimetric_capacity": C_grav,
+            "volumetric_capacity": C_vol,
+            "gravimetric_energy_density": E_grav,
+            "volumetric_energy_density": E_vol,
+            "capacity_units": "mAh/g, mAh/cm^3",
+            "energy_density_units": "Wh/kg, Wh/L",
+        }
 
     def _remove_cations(self, atoms):
         """Return a copy of atoms with all cation species removed."""
