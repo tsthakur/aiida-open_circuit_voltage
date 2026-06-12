@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aiida-open_circuit_voltage"
-version = "0.3.0"
+version = "0.4.0"
 description = "The AiiDA plugin to calculate ocv at various charge of states using QE"
 readme = "README.md"
 license = { text = "MIT License" }

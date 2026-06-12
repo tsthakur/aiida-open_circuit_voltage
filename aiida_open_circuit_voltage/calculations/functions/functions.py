@@ -579,7 +579,7 @@ def get_json_outputs(
     if low_SOC_structures:
         low_SOC_structure_o = low_SOC_structures.get_dict()
     else:
-        low_SOC_structure_o = {"low_SOC_structure_01": None}
+        low_SOC_structure_o = {"low_SOC_structure_00": None}
 
     if high_SOC_structures:
         high_SOC_structure_o = high_SOC_structures.get_dict()
@@ -587,7 +587,7 @@ def get_json_outputs(
             constrained_charged_structure
         ).get_dict()
     else:
-        high_SOC_structure_o = {"high_SOC_structure_01": None}
+        high_SOC_structure_o = {"high_SOC_structure_00": None}
         constrained_charged_structure_o = None
 
     if not meta:
