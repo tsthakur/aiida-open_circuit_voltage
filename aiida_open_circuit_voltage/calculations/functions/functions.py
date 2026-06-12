@@ -4,6 +4,35 @@ from aiida import orm
 from aiida.engine import calcfunction, workfunction
 import numpy as np
 
+from aiida_open_circuit_voltage.cations import get_cation_valence
+
+
+def _get_internal_energy(output_parameters):
+    output_d = (
+        output_parameters.get_dict()
+        if hasattr(output_parameters, "get_dict")
+        else output_parameters
+    )
+    return output_d["energy"] - output_d.get("energy_smearing", 0.0)
+
+
+def _get_input_structure_from_output_parameters(output_parameters):
+    """Return the input structure for PwRelaxWorkChain or PwBaseWorkChain outputs."""
+    from aiida.plugins import WorkflowFactory
+
+    process_specs = (("quantumespresso.pw.relax", ("structure",)),
+        ("quantumespresso.pw.base", ("pw", "structure")),)
+    
+    for entry_point, input_path in process_specs:
+        nodes = output_parameters.get_incoming(WorkflowFactory(entry_point)).all_nodes()
+        if nodes:
+            inputs = nodes[-1].inputs
+            for key in input_path:
+                inputs = inputs[key]
+            return inputs
+
+    raise ValueError("Could not find a PwRelaxWorkChain or PwBaseWorkChain input structure for the output parameters.")
+
 
 @workfunction
 def get_lowest_energy(**kwargs):
@@ -11,7 +40,7 @@ def get_lowest_energy(**kwargs):
     and returns the one with lowest energy"""
     min_energy = None
     for key, val in kwargs.items():
-        energy = val["energy"]
+        energy = _get_internal_energy(val)
         if min_energy is None:
             min_energy = energy
             result = val
@@ -400,50 +429,37 @@ def get_OCVs(
     :param ocv_parameters: the ``Dictionary`` instance used within the OCVWorkChain.
     from the ocv_parameters.
     """
-    from aiida.plugins import WorkflowFactory
-
     ocv_parameters_d = ocv_parameters.get_dict()
-    discharged_d = discharged_ouput_parameter.get_dict()
-    charged_d = charged_ouput_parameter.get_dict()
+    cation = ocv_parameters_d["cation"]
+    discharged_energy = _get_internal_energy(discharged_ouput_parameter)
+    charged_energy = _get_internal_energy(charged_ouput_parameter)
 
     # Loading the discharged structure
-    discharged_unitcell = (
-        discharged_ouput_parameter.get_incoming(
-            WorkflowFactory("quantumespresso.pw.relax")
-        )
-        .all_nodes()[-1]
-        .inputs["structure"]
+    discharged_unitcell = _get_input_structure_from_output_parameters(
+        discharged_ouput_parameter
     )
     total_cations_unitcell = get_cations_in_structure(
-        discharged_unitcell, ocv_parameters_d["cation"]
+        discharged_unitcell, cation
     )["no_of_cations"]
 
     if low_SOC_ouput_parameter:
-        low_SOC_d = low_SOC_ouput_parameter.get_dict()
-        low_SOC_supercell = (
-            low_SOC_ouput_parameter.get_incoming(
-                WorkflowFactory("quantumespresso.pw.relax")
-            )
-            .all_nodes()[-1]
-            .inputs["structure"]
+        low_energy = _get_internal_energy(low_SOC_ouput_parameter)
+        low_SOC_supercell = _get_input_structure_from_output_parameters(
+            low_SOC_ouput_parameter
         )
-        total_cations_supercell = (
-            get_cations_in_structure(low_SOC_supercell, ocv_parameters_d["cation"])[
+        total_cations_low_supercell = (
+            get_cations_in_structure(low_SOC_supercell, cation)[
                 "no_of_cations"
             ]
             + 1
         )
 
     if high_SOC_ouput_parameter:
-        high_SOC_d = high_SOC_ouput_parameter.get_dict()
-        constrained_d = constrained_charged_ouput_parameter.get_dict()
+        high_energy = _get_internal_energy(high_SOC_ouput_parameter)
+        constrained_energy = _get_internal_energy(constrained_charged_ouput_parameter)
         # Loading the high SOC structure
-        high_SOC_supercell = (
-            high_SOC_ouput_parameter.get_incoming(
-                WorkflowFactory("quantumespresso.pw.relax")
-            )
-            .all_nodes()[-1]
-            .inputs["structure"]
+        high_SOC_supercell = _get_input_structure_from_output_parameters(
+            high_SOC_ouput_parameter
         )
         # Since this supercell has only 1 atom, I need to query the main supercell it was constructed from to
         # count the no. of cations in supercell
@@ -453,50 +469,28 @@ def get_OCVs(
             .get_incoming(orm.StructureData)
             .all_nodes()[0]
         )
-        total_cations_supercell = get_cations_in_structure(
-            supercell, ocv_parameters_d["cation"]
+        total_cations_high_supercell = get_cations_in_structure(
+            supercell, cation
         )["no_of_cations"]
 
     if bulk_cation_scf_output:
-        bulk_cation_d = bulk_cation_scf_output.get_dict()
         # Loading the bulk cation structure
-        bulk_cation_structure = (
-            bulk_cation_scf_output.get_incoming(
-                WorkflowFactory("quantumespresso.pw.base")
-            )
-            .all_nodes()[-1]
-            .inputs["pw"]["structure"]
+        bulk_cation_structure = _get_input_structure_from_output_parameters(
+            bulk_cation_scf_output
         )
-        # Using try block to remove smearing energy in case smearing was used
+        cation_energy = _get_internal_energy(bulk_cation_scf_output) / len(
+            bulk_cation_structure.sites
+        )
+    else:
+        energy_key = f"DFT_energy_bulk_{cation}"
         try:
-            # I add back the only cation present in the high SOC structure, to get total number of cations in the supercell
-            cation_energy = (bulk_cation_d["energy"] - bulk_cation_d["energy_smearing"])/ len(bulk_cation_structure.sites)
-            discharged_energy = discharged_d["energy"] - discharged_d["energy_smearing"]
-            charged_energy = charged_d["energy"] - charged_d["energy_smearing"]
-            if ocv_parameters_d["do_low_SOC_OCV"]:
-                low_energy = low_SOC_d["energy"] - low_SOC_d["energy_smearing"]
-            if ocv_parameters_d["do_high_SOC_OCV"]:
-                constrained_energy = constrained_d["energy"] - constrained_d["energy_smearing"]
-                high_energy = high_SOC_d["energy"] - high_SOC_d["energy_smearing"]
+            cation_energy = ocv_parameters_d[energy_key]
         except KeyError:
-            cation_energy = bulk_cation_d["energy"] / len(bulk_cation_structure.sites)
-            discharged_energy = discharged_d["energy"]
-            charged_energy = charged_d["energy"]
-            low_energy = low_SOC_d["energy"]
-            constrained_energy = constrained_d["energy"]
-            high_energy = high_SOC_d["energy"]
-    else:
-        cation_energy = ocv_parameters_d[
-            f'DFT_energy_bulk_{ocv_parameters_d["cation"]}'
-        ]
+            raise ValueError(
+                f"Provide bulk_cation_structure or ocv_parameters['{energy_key}']."
+            )
 
-    # need to change the way to load cation energy and z when making this workchain for any general cation
-    if ocv_parameters_d["cation"] == "Li":
-        z = 1
-    elif ocv_parameters_d["cation"] == "Mg":
-        z = 2
-    else:
-        raise NotImplemented("Only Li and Mg ion materials supported now.")
+    z = get_cation_valence(cation)
 
     # I use the following standard equation for calculating voltage between 2 states with x1 and x2 concentration of Li atoms
     # voltage = -[E(Lix2) - E(Lix1) - [x2-x1]E(Li)] / [x2-x1]z
@@ -504,7 +498,7 @@ def get_OCVs(
         # x2-x1 = 1 in this case
         V_low_SOC = (
             low_energy
-            - (total_cations_supercell / total_cations_unitcell)
+            - (total_cations_low_supercell / total_cations_unitcell)
             * discharged_energy
             + 1 * cation_energy
         ) / (z * 1)
@@ -515,7 +509,7 @@ def get_OCVs(
         # x2-x1 = 1 in this case
         # V_high_SOC = ((total_cations_supercell / total_cations_unitcell) * charged_d['energy'] - high_SOC_d['energy'] + 1 * cation_energy) / (z * 1)
         V_high_SOC = (
-            (total_cations_supercell / total_cations_unitcell) * constrained_energy
+            (total_cations_high_supercell / total_cations_unitcell) * constrained_energy
             - high_energy
             + 1 * cation_energy
         ) / (z * 1)

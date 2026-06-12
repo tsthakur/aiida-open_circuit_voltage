@@ -7,6 +7,13 @@ import numpy as np
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.io.ase import AseAtomsAdaptor
 
+from aiida_open_circuit_voltage.cations import (
+    SUPPORTED_CATIONS as CATION_VALENCES,
+    infer_cation_from_ase_atoms,
+    is_missing_cation,
+    validate_cation,
+)
+
 
 class MLIPOCVWorkflow:
     """
@@ -33,10 +40,12 @@ class MLIPOCVWorkflow:
     calculator : ase.calculators.abc.AbcCalculator
         Loaded ASE calculator instance.
         The same instance is reused across all calculations.
-    cation : str
-        Element symbol of the intercalating ion. Supported: 'Li', 'Mg'.
+    cation : str, optional
+        Element symbol of the intercalating ion. If omitted, it is inferred
+        when the structure contains exactly one supported cation.
+        Supported: 'Li', 'Na', 'K', 'Mg', 'Ca', 'Al'.
     bulk_cation_structure : ase.Atoms
-        Bulk reference structure for the cation (e.g. Li, Mg).
+        Bulk reference structure for the cation (e.g. Li, Na, Mg).
         Its energy per atom is used as the cation chemical potential.
         Should be equilibrium geometry, single-point energy is evaluated 
         (no relaxation is performed).
@@ -68,13 +77,13 @@ class MLIPOCVWorkflow:
         Maximum allowed |delta V/V|. Default: 0.1.
     """
 
-    SUPPORTED_CATIONS = {"Li": 1, "Mg": 2}
+    SUPPORTED_CATIONS = CATION_VALENCES
 
     def __init__(
         self,
         structure,
         calculator,
-        cation="Li",
+        cation=None,
         bulk_cation_structure=None,
         distance=8.0,
         fmax=0.05,
@@ -86,14 +95,15 @@ class MLIPOCVWorkflow:
         volume_change_stability=False,
         volume_change_stability_threshold=0.1,
     ):
-        if cation not in self.SUPPORTED_CATIONS:
-            raise ValueError(
-                f"Cation '{cation}' not supported. Choose from {list(self.SUPPORTED_CATIONS)}."
-            )
+        if is_missing_cation(cation):
+            cation = infer_cation_from_ase_atoms(structure)
+        else:
+            cation = validate_cation(cation)
+
         if bulk_cation_structure is None:
             raise ValueError(
                 "bulk_cation_structure is required. Provide an ASE Atoms object "
-                "of the bulk cation reference (e.g. Li, Mg)."
+                "of the bulk cation reference."
             )
 
         if optimiser is None:
