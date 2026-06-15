@@ -18,6 +18,14 @@ pip install aiida-open_circuit_voltage
 A jupyter notebook along with an AiiDA compatible structure (olivine LiFePO4) is bundled as an example to run the workchain. 
 To import the structure refer to the instructions here - https://aiida.readthedocs.io/projects/aiida-core/en/latest/howto/share_data.html#importing-an-archive
 
+## DFT+U+V (extended Hubbard)
+
+By default the workchain computes all energies at plain GGA (PBEsol). To instead use
+self-consistent extended Hubbard parameters (`hp.x` linear response), pass an `hp_code` and a
+Hubbard *spec* describing which manifolds to correct. The discharged and charged unitcells are run
+through [`aiida-hubbard`](https://github.com/aiidateam/aiida-hubbard)'s `SelfConsistentHubbardWorkChain`; the converged U/V are then used (exactly
+for low-SOC supercells, per-symbol-averaged for the charged-composition cells) in fixed-U/V
+relaxations for every voltage-related energy.
 
 ## Acknowledgements
 
