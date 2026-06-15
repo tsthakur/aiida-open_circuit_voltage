@@ -114,11 +114,19 @@ def get_unique_cation_sites(structure, cation):
     }
 
 
-def make_supercell(structure, distance):
+def make_supercell(structure, distance, standardize=True):
     from supercellor import supercell as sc
 
+    # In Hubbard mode the caller passes ``standardize=False`` so the supercell lattice stays an
+    # exact integer multiple of the unitcell vectors (no rigid rotation), which is required for
+    # ``HubbardUtils.get_hubbard_for_supercell`` to map parameters by position. Plain runs keep
+    # the default standardized cell, so their behaviour is unchanged.
     pym_sc_struct = sc.make_supercell(
-        structure.get_pymatgen_structure(), distance, verbosity=0, do_niggli_first=False
+        structure.get_pymatgen_structure(),
+        distance,
+        verbosity=0,
+        do_niggli_first=False,
+        standardize=standardize,
     )[0]
     sc_struct = orm.StructureData()
     sc_struct.set_extra("original_unitcell", structure.uuid)
@@ -461,17 +469,16 @@ def get_OCVs(
         high_SOC_supercell = _get_input_structure_from_output_parameters(
             high_SOC_ouput_parameter
         )
-        # Since this supercell has only 1 atom, I need to query the main supercell it was constructed from to
-        # count the no. of cations in supercell
-        supercell = (
-            high_SOC_supercell.get_incoming()
-            .all_nodes()[0]
-            .get_incoming(orm.StructureData)
-            .all_nodes()[0]
-        )
-        total_cations_high_supercell = get_cations_in_structure(
-            supercell, cation
-        )["no_of_cations"]
+        # The high SOC supercell keeps only 1 cation, so the total number of cations in the parent
+        # supercell is recovered from the ``missing_cations`` extra (set in ``get_high_SOC`` and
+        # propagated by the Hubbard re-init calcfunctions): total = missing + 1. Falling back to the
+        # legacy provenance walk keeps older runs working.
+        missing_cations = high_SOC_supercell.base.extras.all.get("missing_cations")
+        if missing_cations is not None:
+            total_cations_high_supercell = missing_cations + 1
+        else:
+            supercell = (high_SOC_supercell.get_incoming().all_nodes()[0].get_incoming(orm.StructureData).all_nodes()[0])
+            total_cations_high_supercell = get_cations_in_structure(supercell, cation)["no_of_cations"]
 
     if bulk_cation_scf_output:
         # Loading the bulk cation structure
