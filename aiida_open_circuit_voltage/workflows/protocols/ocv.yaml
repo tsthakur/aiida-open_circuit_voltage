@@ -10,8 +10,9 @@ default_inputs:
         energy_units: 'V'
         volume_change_stability_threshold: 0.1
         volume_change_stability: True
-        do_high_SOC_OCV: True # if false the OCV at high SOC is not calculated and neither the high SOC supercell relaxed 
-        do_low_SOC_OCV: True # if false the OCV at low SOC is not calculated and neither the low SOC supercell relaxed 
+        do_high_SOC_OCV: True # if false the OCV at high SOC is not calculated and neither the high SOC supercell relaxed
+        do_low_SOC_OCV: True # if false the OCV at low SOC is not calculated and neither the low SOC supercell relaxed
+        for_r2scan: False # if true, bypass the UUID-based workchain reuse so pre-relaxed endpoints / bulk cation are re-run with the (r2SCAN) functional in the inputs instead of reusing the PBEsol workchain that produced them
     ocv_relax:
         # PwRelaxWorkChain reads `pseudo_family` from the `base` / `base_final_scf` namespaces, not
         # at the top level, so it must be nested here (a top-level key is silently ignored).

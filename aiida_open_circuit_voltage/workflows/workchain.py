@@ -633,15 +633,19 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             bulk_cation_structure = self.inputs.bulk_cation_structure
 
             self.report(f"Bulk cation structure <{bulk_cation_structure.pk}> provided, I will use this structure to calculate scf energy of {self.ctx.cation}.")
-            qb = orm.QueryBuilder()
-            qb.append(orm.StructureData, filters={"uuid": {"==": bulk_cation_structure.uuid}}, tag="struct", )
-            qb.append(WorkflowFactory("quantumespresso.pw.base"), with_incoming="struct", tag="base", 
-                      filters={"and": [{"attributes.process_state": {"==": "finished"}}, {"attributes.exit_status": {"==": 0}},]},)
+            reuse = None
+            # `for_r2scan` bypasses the reuse so the SCF is re-run with the functional in the inputs.
+            if not self.ctx.ocv_parameters_d.get("for_r2scan", False):
+                qb = orm.QueryBuilder()
+                qb.append(orm.StructureData, filters={"uuid": {"==": bulk_cation_structure.uuid}}, tag="struct", )
+                qb.append(WorkflowFactory("quantumespresso.pw.base"), with_incoming="struct", tag="base",
+                          filters={"and": [{"attributes.process_state": {"==": "finished"}}, {"attributes.exit_status": {"==": 0}},]},)
+                if qb.count():
+                    reuse = qb.all(flat=True)[-1]
 
-            if qb.count():
-                wc = qb.all(flat=True)[-1]
-                self.report(f"Workchain <{wc.pk}> corresponding to bulk cation found")
-                return ToContext(cation_workchain=append_(wc))
+            if reuse is not None:
+                self.report(f"Workchain <{reuse.pk}> corresponding to bulk cation found")
+                return ToContext(cation_workchain=append_(reuse))
 
             else:
                 inputs = AttributeDict(self.exposed_inputs(PwBaseWorkChain, namespace="scf"))
@@ -776,15 +780,19 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.ctx.discharged_unitcell_relaxed = (self.inputs.discharged_unitcell_relaxed)
             self.report(f"Relaxed discharged unitcell <{self.ctx.discharged_unitcell_relaxed.pk}> already provided")
 
-            qb = orm.QueryBuilder()
-            qb.append(orm.StructureData, filters={"uuid": {"==": self.ctx.discharged_unitcell_relaxed.uuid}}, tag="struct",)
-            qb.append(WorkflowFactory("quantumespresso.pw.relax"), with_outgoing="struct", tag="base", 
-                      filters={"and": [{"attributes.process_state": {"==": "finished"}}, {"attributes.exit_status": {"==": 0}},]},)
+            reuse = None
+            # `for_r2scan` bypasses the reuse so a fresh SCF (with the functional in the inputs) is run.
+            if not self.ctx.ocv_parameters_d.get("for_r2scan", False):
+                qb = orm.QueryBuilder()
+                qb.append(orm.StructureData, filters={"uuid": {"==": self.ctx.discharged_unitcell_relaxed.uuid}}, tag="struct",)
+                qb.append(WorkflowFactory("quantumespresso.pw.relax"), with_outgoing="struct", tag="base",
+                          filters={"and": [{"attributes.process_state": {"==": "finished"}}, {"attributes.exit_status": {"==": 0}},]},)
+                if qb.count():
+                    reuse = qb.all(flat=True)[-1]
 
-            if qb.count():
-                wc = qb.all(flat=True)[-1]
-                self.report(f"Workchain <{wc.pk}> corresponding to relaxed discharged unitcell found")
-                return wc
+            if reuse is not None:
+                self.report(f"Workchain <{reuse.pk}> corresponding to relaxed discharged unitcell found")
+                return reuse
 
             else:
                 inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace="ocv_relax"))["base_final_scf"]
@@ -838,15 +846,19 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.ctx.charged_unitcell_relaxed = self.inputs.charged_unitcell_relaxed
             self.report(f"Relaxed charged unitcell <{self.ctx.charged_unitcell_relaxed.pk}> already provided.")
 
-            qb = orm.QueryBuilder()
-            qb.append(orm.StructureData, filters={"uuid": {"==": self.ctx.charged_unitcell_relaxed.uuid}}, tag="struct",)
-            qb.append(WorkflowFactory("quantumespresso.pw.relax"), with_outgoing="struct", tag="base", 
-                      filters={"and": [{"attributes.process_state": {"==": "finished"}}, {"attributes.exit_status": {"==": 0}},]},)
+            reuse = None
+            # `for_r2scan` bypasses the reuse so a fresh SCF (with the functional in the inputs) is run.
+            if not self.ctx.ocv_parameters_d.get("for_r2scan", False):
+                qb = orm.QueryBuilder()
+                qb.append(orm.StructureData, filters={"uuid": {"==": self.ctx.charged_unitcell_relaxed.uuid}}, tag="struct",)
+                qb.append(WorkflowFactory("quantumespresso.pw.relax"), with_outgoing="struct", tag="base",
+                          filters={"and": [{"attributes.process_state": {"==": "finished"}}, {"attributes.exit_status": {"==": 0}},]},)
+                if qb.count():
+                    reuse = qb.all(flat=True)[-1]
 
-            if qb.count():
-                wc = qb.all(flat=True)[-1]
-                self.report(f"Workchain <{wc.pk}> corresponding to relaxed charged unitcell found")
-                return wc
+            if reuse is not None:
+                self.report(f"Workchain <{reuse.pk}> corresponding to relaxed charged unitcell found")
+                return reuse
 
             else:
                 inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace="ocv_relax"))["base_final_scf"]
