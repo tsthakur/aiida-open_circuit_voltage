@@ -8,9 +8,12 @@ path never imports from here at runtime (the workchain only touches these functi
 The Hubbard parameter flow is:
 
 * the user supplies a *spec* (``{'U': [[kind, manifold], ...], 'V': [[kind, man, nbr, nbr_man], ...]}``)
-  or a pre-initialised ``HubbardStructureData`` from which the spec is extracted;
-* :func:`build_initialized_hubbard_structure` seeds a ``HubbardStructureData`` with placeholder
-  (1e-8 eV) values which the ``SelfConsistentHubbardWorkChain`` converges with ``hp.x``;
+  or a pre-initialised ``HubbardStructureData`` from which the spec is extracted; every entry may
+  optionally carry a trailing *initial value* in eV (``['Fe', '3d', 5.3]``), e.g. a literature U
+  used to seed the self-consistent loop from a localized ground state;
+* :func:`build_initialized_hubbard_structure` seeds a ``HubbardStructureData`` with the spec's
+  initial values (placeholder ``DEFAULT_SEED_EV`` when absent) which the
+  ``SelfConsistentHubbardWorkChain`` converges with ``hp.x``;
 * converged values are transferred to the SOC supercells either *exactly*
   (:func:`get_hubbard_supercell`, low-SOC) or as *per-symbol averages*
   (:func:`get_hubbard_averaged`, charged-composition cells).
@@ -20,6 +23,10 @@ from aiida.engine import calcfunction
 from aiida.plugins import DataFactory
 
 HubbardStructureData = DataFactory("quantumespresso.hubbard_structure")
+
+# Fallback seed (eV) for spec entries that carry no explicit initial value
+# the self-consistent loop starts from the bare-GGA response, i.e. aiida-hubbard convention.
+DEFAULT_SEED_EV = 1e-8
 
 # Extras propagated from a source structure onto a derived Hubbard structure so the existing
 # provenance/extras conventions of the plugin keep working unchanged.
@@ -49,15 +56,27 @@ def _as_dict(spec):
     raise HubbardSpecError("The Hubbard spec must be a dict or an orm.Dict.")
 
 
+def _validate_seed_value(value, entry):
+    """Return ``value`` as a positive float, raising ``HubbardSpecError`` otherwise."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HubbardSpecError(f"The initial value in {entry!r} must be a number in eV; got {value!r}.")
+    if value <= 0:
+        raise HubbardSpecError(f"The initial value in {entry!r} must be positive; got {value!r}.")
+    return float(value)
+
+
 def validate_hubbard_spec(spec, structure=None, cation=None):
     """Validate and normalize a Hubbard spec.
 
-    :param spec: dict / ``orm.Dict`` of the form 
+    :param spec: dict / ``orm.Dict`` of the form
         ``{'U': [[kind, manifold], ...], 'V': [[kind, man, nbr, nbr_man], ...]}``.
-        ``V`` is optional; ``U`` must contain at least one entry.
+        ``V`` is optional; ``U`` must contain at least one entry. Every entry may carry an
+        optional trailing initial value in eV (e.g. ``['Fe', '3d', 5.3]``) used to seed the
+        self-consistent loop; entries without one default to ``DEFAULT_SEED_EV``.
     :param structure: optional ``StructureData`` used to check that every named kind exists.
     :param cation: optional cation label; raises if the cation appears as a Hubbard atom/neighbour.
-    :returns: a normalized JSON-serializable spec dict with ``'U'`` and ``'V'`` lists.
+    :returns: a normalized JSON-serializable spec dict with ``'U'`` and ``'V'`` lists whose entries
+        always include the seed value (``[kind, manifold, value]`` / ``[kind, man, nbr, nbr_man, value]``).
     :raises HubbardSpecError: if the spec is malformed or references missing kinds.
     :raises CationIsHubbardAtomError: if the cation is a Hubbard atom or neighbour.
     """
@@ -71,15 +90,17 @@ def validate_hubbard_spec(spec, structure=None, cation=None):
 
     normalized_u = []
     for entry in raw_u:
-        if len(entry) != 2:
-            raise HubbardSpecError(f"Each 'U' entry must be [kind, manifold]; got {entry!r}.")
-        normalized_u.append([str(entry[0]), str(entry[1])])
+        if len(entry) not in (2, 3):
+            raise HubbardSpecError(f"Each 'U' entry must be [kind, manifold] or [kind, manifold, initial_value_eV]; got {entry!r}.")
+        value = _validate_seed_value(entry[2], entry) if len(entry) == 3 else DEFAULT_SEED_EV
+        normalized_u.append([str(entry[0]), str(entry[1]), value])
 
     normalized_v = []
     for entry in raw_v:
-        if len(entry) != 4:
-            raise HubbardSpecError(f"Each 'V' entry must be [kind, manifold, neighbour, neighbour_manifold]; got {entry!r}.")
-        normalized_v.append([str(entry[0]), str(entry[1]), str(entry[2]), str(entry[3])])
+        if len(entry) not in (4, 5):
+            raise HubbardSpecError(f"Each 'V' entry must be [kind, manifold, neighbour, neighbour_manifold] with an optional trailing initial_value_eV; got {entry!r}.")
+        value = _validate_seed_value(entry[4], entry) if len(entry) == 5 else DEFAULT_SEED_EV
+        normalized_v.append([str(entry[0]), str(entry[1]), str(entry[2]), str(entry[3]), value])
 
     if structure is not None:
         kind_names = {kind.name for kind in structure.kinds}
@@ -110,7 +131,8 @@ def extract_hubbard_spec(hubbard_structure):
 
     Onsite parameters (``atom_index == neighbour_index`` with equal manifolds) become ``'U'``
     entries; the rest become ``'V'`` entries. Entries are keyed by *kind name* and de-duplicated
-    while preserving order.
+    while preserving order; each entry carries the first-encountered value as its initial seed,
+    so a pre-initialised structure keeps its starting values.
     """
     sites = hubbard_structure.sites
     seen_u, seen_v = set(), set()
@@ -124,12 +146,18 @@ def extract_hubbard_spec(hubbard_structure):
             key = (kind_i, param.atom_manifold)
             if key not in seen_u:
                 seen_u.add(key)
-                u_entries.append([kind_i, param.atom_manifold])
+                entry = [kind_i, param.atom_manifold]
+                if param.value > 0:  # non-positive values are not valid seeds; fall back to the default
+                    entry.append(param.value)
+                u_entries.append(entry)
         else:
             key = (kind_i, param.atom_manifold, kind_j, param.neighbour_manifold)
             if key not in seen_v:
                 seen_v.add(key)
-                v_entries.append([kind_i, param.atom_manifold, kind_j, param.neighbour_manifold])
+                entry = [kind_i, param.atom_manifold, kind_j, param.neighbour_manifold]
+                if param.value > 0:
+                    entry.append(param.value)
+                v_entries.append(entry)
 
     if not u_entries:
         raise HubbardSpecError("The provided HubbardStructureData has no onsite (U) parameters to extract.")
@@ -137,16 +165,18 @@ def extract_hubbard_spec(hubbard_structure):
 
 
 def build_initialized_hubbard_structure(structure, spec):
-    """Return an (unstored) ``HubbardStructureData`` seeded with placeholder (1e-8) U/V values.
+    """Return an (unstored) ``HubbardStructureData`` seeded with the spec's initial U/V values.
 
-    The real values are computed self-consistently by the ``SelfConsistentHubbardWorkChain``.
+    Entries without an explicit value are seeded with the ``DEFAULT_SEED_EV`` placeholder. The
+    real values are computed self-consistently by the ``SelfConsistentHubbardWorkChain``; 
+    a finite seed only conditions the starting ground state of that loop.
     """
     spec = validate_hubbard_spec(spec, structure=structure)
     hubbard_structure = HubbardStructureData.from_structure(structure)
-    for kind, manifold in spec["U"]:
-        hubbard_structure.initialize_onsites_hubbard(kind, manifold, 1e-8, "U")
-    for kind, manifold, neighbour, neighbour_manifold in spec["V"]:
-        hubbard_structure.initialize_intersites_hubbard(kind, manifold, neighbour, neighbour_manifold, 1e-8, "V")
+    for kind, manifold, value in spec["U"]:
+        hubbard_structure.initialize_onsites_hubbard(kind, manifold, value, "U")
+    for kind, manifold, neighbour, neighbour_manifold, value in spec["V"]:
+        hubbard_structure.initialize_intersites_hubbard(kind, manifold, neighbour, neighbour_manifold, value, "V")
     return hubbard_structure
 
 
@@ -196,10 +226,10 @@ def _build_averaged_hubbard_structure(structure, hubbard_source, spec):
     source_symbols = {kind.name: kind.symbol for kind in hubbard_source.kinds}
 
     pairs = {}
-    for kind, manifold in spec["U"]:
+    for kind, manifold, _ in spec["U"]:
         symbol = source_symbols.get(kind, kind)
         neighbours = {}
-        for v_kind, v_man, v_nbr, v_nbr_man in spec["V"]:
+        for v_kind, v_man, v_nbr, v_nbr_man, _ in spec["V"]:
             if v_kind == kind:
                 neighbours[source_symbols.get(v_nbr, v_nbr)] = v_nbr_man
         u_value = u_avg.get((symbol, manifold), 1e-8)
@@ -250,7 +280,7 @@ def _copy_structure_extras(source, target, **overrides):
 
 @calcfunction
 def initialize_hubbard_structure(structure, hubbard_spec):
-    """Return a ``HubbardStructureData`` seeded with placeholder U/V values for the SC loop."""
+    """Return a ``HubbardStructureData`` seeded with the spec's initial U/V values for the SC loop."""
     hubbard_structure = build_initialized_hubbard_structure(structure, hubbard_spec)
     _copy_structure_extras(structure, hubbard_structure)
     return {"hubbard_structure": hubbard_structure}
@@ -301,7 +331,7 @@ def get_hubbard_averaged(structure, hubbard_source, hubbard_spec):
 
 def _supercell_fully_covered(supercell_hubbard, spec):
     """Return True if every supercell site of an onsite Hubbard symbol carries an onsite param."""
-    onsite_symbols = {kind for kind, _ in spec["U"]}
+    onsite_symbols = {entry[0] for entry in spec["U"]}
     # ``spec`` uses unitcell kind names; supercell (pymatgen-derived) kinds equal symbols. Compare
     # on symbols so the check is robust to kind/symbol naming.
     symbol_kinds = {kind.name: kind.symbol for kind in supercell_hubbard.kinds}

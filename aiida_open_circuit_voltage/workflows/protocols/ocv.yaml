@@ -26,7 +26,7 @@ default_inputs:
     # aiida-hubbard's own protocols of the same name (fast/balanced/stringent), so they are not
     # duplicated here.
     hubbard_sc:
-        skip_relax_iterations: 1  # settle U/V at the input geometry first (initial U ~ 1e-8)
+        skip_relax_iterations: 1  # settle U/V at the input geometry first (seeded from the spec's initial values, default ~ 1e-8)
         meta_convergence: True
         scf:
             pseudo_family: 'SSSP/1.3/PBEsol/efficiency'
