@@ -4,4 +4,4 @@ aiida_open_circuit_voltage
 AiiDA plugin to comput open circuit voltages
 """
 
-__version__ = "0.5.1"
+__version__ = "0.6"

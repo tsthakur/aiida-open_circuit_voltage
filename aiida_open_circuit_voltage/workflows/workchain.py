@@ -668,6 +668,29 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             # I put this context dictionary as none so that the energy can be read from ocv_relax_parameters dictionary
             self.ctx.bulk_cation_d = None
 
+    def _apply_tot_magnetization(self, pw_inputs, branch):
+        """Apply the per-branch total-magnetization constraint from ``ocv_parameters`` (if set).
+
+        ``ocv_parameters['tot_magnetization_discharged'/'tot_magnetization_charged']`` pin the
+        total moment (µB units, pw.x ``SYSTEM.tot_magnetization``) of the corresponding unitcell's
+        pw.x runs — the SC-loop *relax* and the fixed-U/V relax/SCF. The two branches need
+        independent values because their electron counts differ (e.g. AFM LiFePO4 = 16 µB Fe²⁺ vs
+        FePO4 = 20 µB Fe³⁺); an unset key leaves that branch unconstrained.
+
+        This constraint is deliberately not applied to the SC-loop *smearing* scf because with
+        ``tot_magnetization`` pw.x reports ``fermi_energy_up/down`` instead of ``fermi_energy``,
+        and ``SelfConsistentHubbardWorkChain.recon_scf`` reads ``parameters['fermi_energy']``
+        unconditionally meaning the workchain would except with a ``KeyError``.
+        """
+        value = self.ctx.ocv_parameters_d.get(f"tot_magnetization_{branch}")
+        if value is None:
+            return
+        parameters = pw_inputs.parameters
+        if isinstance(parameters, orm.Dict):
+            parameters = parameters.get_dict()
+        parameters.setdefault("SYSTEM", {})["tot_magnetization"] = value
+        pw_inputs.parameters = parameters
+
     def _prepare_hubbard_sc_inputs(self, hubbard_structure, label, remove_cation=False):
         """Prepare inputs for one SelfConsistentHubbardWorkChain run."""
         inputs = AttributeDict(self.exposed_inputs(SelfConsistentHubbardWorkChain, namespace="hubbard_sc"))
@@ -683,6 +706,12 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self._remove_cation_from_pw_inputs(inputs.scf.pw)
             inputs.relax.base.pw.parameters = inputs.relax.base.pw.parameters.get_dict()
             self._remove_cation_from_pw_inputs(inputs.relax.base.pw)
+
+        # Only the SC-internal relax gets the moment constraint — never the smearing scf, whose
+        # two-Fermi-level output would crash recon_scf upstream (see _apply_tot_magnetization).
+        branch = "charged" if remove_cation else "discharged"
+        if "relax" in inputs:
+            self._apply_tot_magnetization(inputs.relax.base.pw, branch)
 
         inputs.metadata.call_link_label = label
         inputs.metadata.label = label
@@ -784,7 +813,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             # `for_r2scan` bypasses the reuse so a fresh SCF (with the functional in the inputs) is run.
             if not self.ctx.ocv_parameters_d.get("for_r2scan", False):
                 qb = orm.QueryBuilder()
-                qb.append(orm.StructureData, filters={"uuid": {"==": self.ctx.discharged_unitcell_relaxed.uuid}}, tag="struct",)
+                # (StructureData, HubbardStructureData) tuple: HubbardStructureData is not a
+                # node-type subpath of StructureData, so a plain StructureData append can never
+                # match the Hubbard-mode restart inputs and the reuse would silently be skipped.
+                qb.append((orm.StructureData, HubbardStructureData), filters={"uuid": {"==": self.ctx.discharged_unitcell_relaxed.uuid}}, tag="struct",)
                 qb.append(WorkflowFactory("quantumespresso.pw.relax"), with_outgoing="struct", tag="base",
                           filters={"and": [{"attributes.process_state": {"==": "finished"}}, {"attributes.exit_status": {"==": 0}},]},)
                 if qb.count():
@@ -800,6 +832,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 if self.ctx.hubbard_active:
                     inputs.pw.parameters = inputs.pw.parameters.get_dict()
                     self._adapt_pw_inputs_to_structure(inputs.pw, self.ctx.discharged_unitcell_relaxed)
+                self._apply_tot_magnetization(inputs.pw, "discharged")
                 inputs.metadata.call_link_label = "discharged_scf"
                 inputs.metadata.label = "discharged_scf"
 
@@ -829,6 +862,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self._adapt_pw_inputs_to_structure(inputs.base.pw, discharged_unitcell)
             self._adapt_pw_inputs_to_structure(inputs.base_final_scf.pw, discharged_unitcell)
 
+        self._apply_tot_magnetization(inputs.base.pw, "discharged")
+        self._apply_tot_magnetization(inputs.base_final_scf.pw, "discharged")
+
         inputs.metadata.call_link_label = "discharged_relax"
         inputs.metadata.label = "discharged_relax"
 
@@ -850,7 +886,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             # `for_r2scan` bypasses the reuse so a fresh SCF (with the functional in the inputs) is run.
             if not self.ctx.ocv_parameters_d.get("for_r2scan", False):
                 qb = orm.QueryBuilder()
-                qb.append(orm.StructureData, filters={"uuid": {"==": self.ctx.charged_unitcell_relaxed.uuid}}, tag="struct",)
+                qb.append((orm.StructureData, HubbardStructureData), filters={"uuid": {"==": self.ctx.charged_unitcell_relaxed.uuid}}, tag="struct",)
                 qb.append(WorkflowFactory("quantumespresso.pw.relax"), with_outgoing="struct", tag="base",
                           filters={"and": [{"attributes.process_state": {"==": "finished"}}, {"attributes.exit_status": {"==": 0}},]},)
                 if qb.count():
@@ -870,6 +906,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                     self._adapt_pw_inputs_to_structure(inputs.pw, self.ctx.charged_unitcell_relaxed)
                 else:
                     self._remove_cation_from_pw_inputs(inputs.pw)
+                self._apply_tot_magnetization(inputs.pw, "charged")
                 inputs.metadata.call_link_label = "charged_scf"
                 inputs.metadata.label = "charged_scf"
 
@@ -906,6 +943,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             # Removing cation pseudopotential since this structure no longer has any cation in it
             self._remove_cation_from_pw_inputs(inputs.base.pw)
             self._remove_cation_from_pw_inputs(inputs.base_final_scf.pw)
+
+        self._apply_tot_magnetization(inputs.base.pw, "charged")
+        self._apply_tot_magnetization(inputs.base_final_scf.pw, "charged")
 
         inputs.metadata.call_link_label = "charged_relax"
         inputs.metadata.label = "charged_relax"
