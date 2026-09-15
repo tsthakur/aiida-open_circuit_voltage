@@ -4,6 +4,7 @@ Mother Workchain that calls PwRelaxWorkChain to relax experimental structures an
 calculate DFT energies used to compute open circuit voltages (OCV) at low and high state of 
 charge (SOC) and average OCV for any arbitrary cathode material
 """
+import copy
 import json
 import numpy as np
 from aiida import orm
@@ -23,8 +24,23 @@ from aiida_open_circuit_voltage.calculations.functions import hubbard_functions 
 
 PwRelaxWorkChain = WorkflowFactory("quantumespresso.pw.relax")
 PwBaseWorkChain = WorkflowFactory("quantumespresso.pw.base")
-SelfConsistentHubbardWorkChain = WorkflowFactory("quantumespresso.hp.hubbard")
 HubbardStructureData = DataFactory("quantumespresso.hubbard_structure")
+
+# Currently Hubbard calculations are not supported in aiida-quantumespresso >= 5. 
+# aiida-hubbard < 0.6.0 imports `_lowercase_dict`, removed in aiida-qe 5.0;
+# so the import is guarded, without which, the plugin runs plain GGA only and 
+# the `hubbard_sc` namespace is not exposed. 
+# To run DFT+U+V use plugin v0.6 with aiida-quantumespresso 4.17 and aiida-hubbard 0.5.
+try:
+    SelfConsistentHubbardWorkChain = WorkflowFactory("quantumespresso.hp.hubbard")
+except (ImportError, exceptions.EntryPointError):
+    SelfConsistentHubbardWorkChain = None
+
+HUBBARD_UNSUPPORTED_MESSAGE = (
+    "DFT+U+V (Hubbard) mode is unsupported in this version: aiida-hubbard has no release "
+    "compatible with aiida-quantumespresso >= 5 (check aiida-hubbard PR #119). " 
+    "To run Hubbard mode use aiida-open_circuit_voltage v0.6 with aiida-quantumespresso 4.17 and aiida-hubbard 0.5."
+)
 
 
 class OCVWorkChain(ProtocolMixin, WorkChain):
@@ -66,7 +82,7 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             namespace="ocv_relax",
             exclude=("clean_workdir", "structure"),
             namespace_options={
-                "help": "Inputs for the `PwRelaxWorkChain` for running the four relax calculations are called in the `ocv_relax` namespace."
+                "help": "Inputs for the `PwRelaxWorkChain` (aiida-quantumespresso >= 5 layout: `base_relax` main loop, optional `base_init_relax` pre-relaxation which the builders drop unless explicitly provided) used for all relax calculations, and switched to `calculation = 'scf'` for the SCF-only runs on pre-relaxed unitcells."
             },
         )
         spec.expose_inputs(
@@ -79,20 +95,21 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 "populate_defaults": False,
             },
         )
-        spec.expose_inputs(
-            SelfConsistentHubbardWorkChain,
-            namespace="hubbard_sc",
-            exclude=("clean_workdir", "hubbard_structure"),
-            namespace_options={
-                "help": "Inputs for the `SelfConsistentHubbardWorkChain` run on the discharged and charged unitcells. Providing this namespace switches the workchain into DFT+U+V (Hubbard) mode.",
-                "required": False,
-                "populate_defaults": False,
-            },
-        )
-        # The SelfConsistentHubbardWorkChain has a top-level inputs validator that assumes the scf
-        # namespace is populated; null it here so an absent (plain-DFT) `hubbard_sc` namespace does
-        # not raise. We re-validate the Hubbard inputs ourselves in `setup`.
-        spec.inputs["hubbard_sc"].validator = None
+        if SelfConsistentHubbardWorkChain is not None:
+            spec.expose_inputs(
+                SelfConsistentHubbardWorkChain,
+                namespace="hubbard_sc",
+                exclude=("clean_workdir", "hubbard_structure"),
+                namespace_options={
+                    "help": "Inputs for the `SelfConsistentHubbardWorkChain` run on the discharged and charged unitcells. Providing this namespace switches the workchain into DFT+U+V (Hubbard) mode. Only exposed when an aiida-hubbard compatible with the installed aiida-quantumespresso is available.",
+                    "required": False,
+                    "populate_defaults": False,
+                },
+            )
+            # The SelfConsistentHubbardWorkChain has a top-level inputs validator that assumes the scf
+            # namespace is populated; null it here so an absent (plain-DFT) `hubbard_sc` namespace does
+            # not raise. We re-validate the Hubbard inputs ourselves in `setup`.
+            spec.inputs["hubbard_sc"].validator = None
         spec.input(
             "structure",
             valid_type=orm.StructureData,
@@ -239,16 +256,17 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             self.exposed_inputs(PwRelaxWorkChain, namespace="ocv_relax")
         )
         try:
-            self.ctx.cation_pseudo = ocv_relax_inputs.base.pw.pseudos[self.ctx.cation]
+            self.ctx.cation_pseudo = ocv_relax_inputs.base_relax.pw.pseudos[self.ctx.cation]
         except KeyError:
             self.report(
-                f"The ocv_relax inputs do not contain a pseudo for cation {self.ctx.cation}."
+                f"The ocv_relax.base_relax inputs do not contain a pseudo for cation {self.ctx.cation}."
             )
             return self.exit_codes.ERROR_CATION_NOT_FOUND
+        relax_parameters = ocv_relax_inputs.base_relax.pw.parameters.get_dict()
         # I store cell card as context variable for putting it back if supercells are vc-relaxed
-        self.ctx.cell = ocv_relax_inputs.base.pw.parameters.get_dict()["CELL"]
+        self.ctx.cell = relax_parameters.get("CELL", {})
 
-        if ocv_relax_inputs.base.pw.parameters.get_dict()["SYSTEM"].get("starting_magnetization") is None:
+        if relax_parameters.get("SYSTEM", {}).get("starting_magnetization") is None:
             self.ctx.cation_magnetization = False
         else:
             self.ctx.cation_magnetization = True
@@ -378,6 +396,75 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                         break
             parameters["SYSTEM"]["starting_magnetization"] = new_magnetization
 
+    @staticmethod
+    def _pw_namespaces(relax_inputs):
+        """Yield the `PwBaseWorkChain` namespaces inside a `PwRelaxWorkChain` inputs mapping.
+
+        With aiida-quantumespresso >= 5 a PwRelax inputs mapping always carries ``base_relax`` and
+        optionally ``base_init_relax`` (corresponding to the pre-relaxation option for this plugin).
+        Every per-branch adjustment (cation removal, kind re-keying, total magnetisation, fixed-cell
+        switch) must be applied to all of them, otherwise the pre-relaxation would run with unadjusted 
+        inputs (wrong pseudos for cation-free cells, vc-relax of constrained cells, etc.).
+        """
+        yield relax_inputs.base_relax
+        if "base_init_relax" in relax_inputs:
+            yield relax_inputs.base_init_relax
+
+    @staticmethod
+    def _dictify_parameters(pw_inputs):
+        """Replace an ``orm.Dict`` ``parameters`` entry by a plain (mutable) dict copy.
+        A deep copy is taken because ``Dict.get_dict()`` of an *unstored* node returns the nested
+        dicts by reference, so in-place edits would otherwise leak back into the node.
+        """
+        parameters = pw_inputs.parameters
+        if isinstance(parameters, orm.Dict):
+            pw_inputs.parameters = copy.deepcopy(parameters.get_dict())
+        return pw_inputs
+
+    @staticmethod
+    def _scf_inputs_from_relax(relax_inputs):
+        """Derive `PwBaseWorkChain` SCF inputs from the ``base_relax`` namespace of PwRelax inputs.
+
+        Used for the SCF-only runs on pre-relaxed unitcells (``*_unitcell_relaxed`` 
+        restarts and the r2SCAN//PBEsol pipeline): those energies must be computed 
+        with exactly the cutoffs, k-point density, pseudopotentials, smearing and 
+        functional of the relaxations, so the relax inputs are copied and only 
+        switched to ``calculation = 'scf'`` (ionic and cell namelists dropped).
+        This replaces the ``base_final_scf`` namespace that aiida-quantumespresso < 5.
+        """
+        scf = AttributeDict(relax_inputs.base_relax)
+        parameters = scf.pw.parameters
+        parameters = copy.deepcopy(parameters.get_dict() if isinstance(parameters, orm.Dict) else dict(parameters))
+        parameters.setdefault("CONTROL", {})["calculation"] = "scf"
+        parameters.pop("CELL", None)
+        parameters.pop("IONS", None)
+        scf.pw.parameters = parameters
+        scf.pw.pop("parent_folder", None)
+        return scf
+
+    def _report_subprocess_failure(self, workchain, label):
+        """Report a sub-workchain that did not finish successfully; return True if it failed.
+
+        With aiida-quantumespresso >= 5 the `PwRelaxWorkChain` returns exit code 400
+        (maximum number of meta-convergence iterations reached) *before* attaching any 
+        output, so without this the missing ``output_structure``/ ``output_parameters`` 
+        would only surface as a generic message.
+        """
+        if workchain.is_finished_ok:
+            return False
+        state = workchain.process_state.value if workchain.process_state is not None else None
+        message = (
+            f"{label}: {workchain.process_label}<{workchain.pk}> did not finish successfully "
+            f"(process state {state}, exit status {workchain.exit_status}: {workchain.exit_message})"
+        )
+        max_iterations = getattr(PwRelaxWorkChain.exit_codes, "ERROR_MAX_ITERATIONS_EXCEEDED", None)
+        if max_iterations is not None and workchain.exit_status == max_iterations.status:
+            message += (
+                " (`max_meta_convergence_iterations` in PwRelaxWorkChain reached. The limit fires at iteration == max even if that iteration converged, so never use max = 1)"
+            )
+        self.report(message)
+        return True
+
     @classmethod
     def get_protocol_filepath(cls):
         """
@@ -409,10 +496,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         :param discharged_unitcell_relaxed: the ``StructureData`` instance that has been already relaxed.
         :param charged_unitcell_relaxed: the ``StructureData`` instance that has all the cations removed and has been relaxed.
         :param protocol: protocol to use, if not specified, the default will be used.
-        :param overrides: optional dictionary of inputs to override the defaults of the protocol, usually takes the pseudo potential family and parallelisation options.
-        :param hp_code: the ``Code`` instance configured for the ``quantumespresso.hp`` plugin. Required to run in DFT+U+V (Hubbard) mode, together with a Hubbard spec in ``ocv_parameters['hubbard']`` (or a ``HubbardStructureData`` as ``structure``).
-        :param kwargs: additional keyword arguments that will be passed to the ``get_builder_from_protocol`` of all the
-            sub processes that are called by this workchain.
+        :param overrides: optional dictionary of inputs to override the defaults of the protocol, usually takes the pseudo potential family and parallelisation options. PwRelax settings go under ``ocv_relax.base_relax``; providing ``ocv_relax.base_init_relax`` (even ``{}``) opts into the aiida-quantumespresso >= 5 loose pre-relaxation, which is otherwise dropped from the builder.
+        :param hp_code: the ``Code`` instance configured for the ``quantumespresso.hp`` plugin. Required to run in DFT+U+V (Hubbard) mode, together with a Hubbard spec in ``ocv_parameters['hubbard']`` (or a ``HubbardStructureData`` as ``structure``). Hubbard mode requires aiida-hubbard compatibility with aiida-quantumespresso (see ``HUBBARD_UNSUPPORTED_MESSAGE``).
+        :param kwargs: additional keyword arguments that will be passed to the ``get_builder_from_protocol`` of all the sub processes that are called by this workchain.
         :return: a process builder instance with all inputs defined ready for launch.
         """
         inputs = cls.get_protocol_inputs(protocol, overrides)
@@ -453,11 +539,20 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             )
             hubbard_sc.pop("hubbard_structure", None)
             hubbard_sc.pop("clean_workdir", None)
+            # PwRelax builder of aiida-quantumespresso >= 5  always populates 
+            # the optional loose pre-relaxation `base_init_relax`.
+            # Keep it only when explicitly requested.
+            hubbard_relax_inputs = (inputs.get("hubbard_sc") or {}).get("relax") or {}
+            if "base_init_relax" not in hubbard_relax_inputs:
+                hubbard_sc.relax.pop("base_init_relax", None)
 
         args = (code, structure, protocol)
         ocv_relax = PwRelaxWorkChain.get_builder_from_protocol(
             *args, overrides=inputs["ocv_relax"], **kwargs
         )
+        # Same rule for OCV relaxations (see `_pw_namespaces`).
+        if "base_init_relax" not in inputs["ocv_relax"]:
+            ocv_relax.pop("base_init_relax", None)
         if bulk_cation_structure:
             args_cation = (code, bulk_cation_structure, protocol)
             scf = PwBaseWorkChain.get_builder_from_protocol(
@@ -511,6 +606,9 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
             if spec is not None:
                 raise ValueError("A Hubbard spec was set in ocv_parameters['hubbard'] but no hp_code was provided. Pass hp_code to run DFT+U+V, or remove the spec to run plain DFT.")
             return None
+
+        if SelfConsistentHubbardWorkChain is None:
+            raise ValueError(HUBBARD_UNSUPPORTED_MESSAGE)
 
         if spec is None:
             if isinstance(structure, HubbardStructureData) and structure.hubbard.parameters:
@@ -590,21 +688,23 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         args = (code, structure, protocol)
         args_cation = (code, structure_cation, protocol)
         ocv_relax = PwRelaxWorkChain.get_builder_from_protocol(*args, overrides=inputs["ocv_relax"], spin_type=spin_type, initial_magnetic_moments=initial_magnetic_moments,)
+        if "base_init_relax" not in inputs["ocv_relax"]:
+            ocv_relax.pop("base_init_relax", None)
         scf = PwBaseWorkChain.get_builder_from_protocol(*args_cation, overrides=inputs.get("scf", None))
 
-        # loading k-points
+        # loading k-points (the SCF-only runs on pre-relaxed unitcells inherit these from base_relax)
         kpoints_distance = inputs_j["kpoints_distance"]
         if kpoints_distance:
-            ocv_relax["base"]["kpoints_distance"] = orm.Float(kpoints_distance)
-            ocv_relax["base_final_scf"]["kpoints_distance"] = orm.Float(kpoints_distance)
+            for namespace in cls._pw_namespaces(ocv_relax):
+                namespace["kpoints_distance"] = orm.Float(kpoints_distance)
             scf["kpoints_distance"] = orm.Float(kpoints_distance)
         else:
             kpoints_mesh = inputs_j["kpoints_mesh"]
 
         # Specifying spin-orbit here as it doesn't exist in aiida-quantumespresso
         if spin_orbit:
-            ocv_relax.base["pw"]["parameters"]["SYSTEM"]["lspinorb"] = spin_orbit
-            ocv_relax.base_final_scf["pw"]["parameters"]["SYSTEM"]["lspinorb"] = spin_orbit
+            for namespace in cls._pw_namespaces(ocv_relax):
+                namespace["pw"]["parameters"]["SYSTEM"]["lspinorb"] = spin_orbit
 
         ocv_relax.pop("structure", None)
         ocv_relax.pop("clean_workdir", None)
@@ -699,23 +799,37 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         # the SC workchain otherwise defaults clean_workdir to True.
         inputs.clean_workdir = self.inputs.clean_workdir
 
+        branch = "charged" if remove_cation else "discharged"
         if remove_cation:
             # The charged unitcell has no cation, so drop the cation pseudo / magnetisation from the
             # scf and relax namespaces of the SC workchain.
-            inputs.scf.pw.parameters = inputs.scf.pw.parameters.get_dict()
+            self._dictify_parameters(inputs.scf.pw)
             self._remove_cation_from_pw_inputs(inputs.scf.pw)
-            inputs.relax.base.pw.parameters = inputs.relax.base.pw.parameters.get_dict()
-            self._remove_cation_from_pw_inputs(inputs.relax.base.pw)
 
         # Only the SC-internal relax gets the moment constraint — never the smearing scf, whose
         # two-Fermi-level output would crash recon_scf upstream (see _apply_tot_magnetization).
-        branch = "charged" if remove_cation else "discharged"
         if "relax" in inputs:
-            self._apply_tot_magnetization(inputs.relax.base.pw, branch)
+            for namespace in self._pw_namespaces(inputs.relax):
+                self._dictify_parameters(namespace.pw)
+                if remove_cation:
+                    self._remove_cation_from_pw_inputs(namespace.pw)
+                self._apply_tot_magnetization(namespace.pw, branch)
 
         inputs.metadata.call_link_label = label
         inputs.metadata.label = label
         return prepare_process_inputs(SelfConsistentHubbardWorkChain, inputs)
+
+    def _report_hubbard_failure(self, workchain, label):
+        """Report a failed SelfConsistentHubbardWorkChain and, if any, the exit of its last relax child."""
+        if not self._report_subprocess_failure(workchain, label):
+            return False
+        relax_children = sorted(
+            (child for child in workchain.called if child.process_label == PwRelaxWorkChain.__name__),
+            key=lambda node: node.pk,
+        )
+        if relax_children:
+            self._report_subprocess_failure(relax_children[-1], f"{label} (last relax iteration)")
+        return True
 
     def run_sc_hubbard(self):
         """Launch self-consistent DFT+U+V on the discharged and charged unitcells in parallel.
@@ -761,15 +875,13 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         """Collect the converged Hubbard unitcells; fail if a launched SC-Hubbard run did not converge."""
         if self.ctx.launched_discharged_hubbard:
             workchain = self.ctx.discharged_hubbard_workchain[-1]
-            if not workchain.is_finished_ok:
-                self.report(f"discharged SelfConsistentHubbardWorkChain failed with exit status {workchain.exit_status}")
+            if self._report_hubbard_failure(workchain, "discharged SC-Hubbard"):
                 return self.exit_codes.ERROR_SUB_PROCESS_FAILED_HUBBARD
             self.ctx.discharged_hubbard_structure = workchain.outputs.hubbard_structure
 
         if self.ctx.launched_charged_hubbard:
             workchain = self.ctx.charged_hubbard_workchain[-1]
-            if not workchain.is_finished_ok:
-                self.report(f"charged SelfConsistentHubbardWorkChain failed with exit status {workchain.exit_status}")
+            if self._report_hubbard_failure(workchain, "charged SC-Hubbard"):
                 return self.exit_codes.ERROR_SUB_PROCESS_FAILED_HUBBARD
             self.ctx.charged_hubbard_structure = workchain.outputs.hubbard_structure
 
@@ -827,10 +939,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 return reuse
 
             else:
-                inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace="ocv_relax"))["base_final_scf"]
+                # SCF with the relax settings (calculation switched to scf).
+                inputs = self._scf_inputs_from_relax(AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace="ocv_relax")))
                 inputs.pw.structure = self.ctx.discharged_unitcell_relaxed
                 if self.ctx.hubbard_active:
-                    inputs.pw.parameters = inputs.pw.parameters.get_dict()
                     self._adapt_pw_inputs_to_structure(inputs.pw, self.ctx.discharged_unitcell_relaxed)
                 self._apply_tot_magnetization(inputs.pw, "discharged")
                 inputs.metadata.call_link_label = "discharged_scf"
@@ -856,14 +968,11 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         inputs["structure"] = discharged_unitcell
 
-        if self.ctx.hubbard_active:
-            inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
-            inputs.base_final_scf.pw.parameters = (inputs.base_final_scf.pw.parameters.get_dict())
-            self._adapt_pw_inputs_to_structure(inputs.base.pw, discharged_unitcell)
-            self._adapt_pw_inputs_to_structure(inputs.base_final_scf.pw, discharged_unitcell)
-
-        self._apply_tot_magnetization(inputs.base.pw, "discharged")
-        self._apply_tot_magnetization(inputs.base_final_scf.pw, "discharged")
+        for namespace in self._pw_namespaces(inputs):
+            self._dictify_parameters(namespace.pw)
+            if self.ctx.hubbard_active:
+                self._adapt_pw_inputs_to_structure(namespace.pw, discharged_unitcell)
+            self._apply_tot_magnetization(namespace.pw, "discharged")
 
         inputs.metadata.call_link_label = "discharged_relax"
         inputs.metadata.label = "discharged_relax"
@@ -897,11 +1006,10 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 return reuse
 
             else:
-                inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace="ocv_relax"))["base_final_scf"]
+                # SCF with the relax settings (calculation switched to scf).
+                inputs = self._scf_inputs_from_relax(AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace="ocv_relax")))
                 inputs.pw.structure = self.ctx.charged_unitcell_relaxed
 
-                # Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
-                inputs.pw.parameters = inputs.pw.parameters.get_dict()
                 if self.ctx.hubbard_active:
                     self._adapt_pw_inputs_to_structure(inputs.pw, self.ctx.charged_unitcell_relaxed)
                 else:
@@ -930,22 +1038,16 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
 
         inputs["structure"] = charged_unitcell
 
-        ## Since it's in orm.Dict datatype, I need to get the python dict to make changes to it
-        inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
-        inputs.base_final_scf.pw.parameters = inputs.base_final_scf.pw.parameters.get_dict()
-
-        if self.ctx.hubbard_active:
-            # Re-key pseudos / magnetisation to the cation-free Hubbard kinds (the cation is
-            # automatically dropped since it is absent from the structure).
-            self._adapt_pw_inputs_to_structure(inputs.base.pw, charged_unitcell)
-            self._adapt_pw_inputs_to_structure(inputs.base_final_scf.pw, charged_unitcell)
-        else:
-            # Removing cation pseudopotential since this structure no longer has any cation in it
-            self._remove_cation_from_pw_inputs(inputs.base.pw)
-            self._remove_cation_from_pw_inputs(inputs.base_final_scf.pw)
-
-        self._apply_tot_magnetization(inputs.base.pw, "charged")
-        self._apply_tot_magnetization(inputs.base_final_scf.pw, "charged")
+        for namespace in self._pw_namespaces(inputs):
+            self._dictify_parameters(namespace.pw)
+            if self.ctx.hubbard_active:
+                # Re-key pseudos / magnetisation to the cation-free Hubbard kinds (the cation is
+                # automatically dropped since it is absent from the structure).
+                self._adapt_pw_inputs_to_structure(namespace.pw, charged_unitcell)
+            else:
+                # Removing cation pseudopotential since this structure no longer has any cation in it
+                self._remove_cation_from_pw_inputs(namespace.pw)
+            self._apply_tot_magnetization(namespace.pw, "charged")
 
         inputs.metadata.call_link_label = "charged_relax"
         inputs.metadata.label = "charged_relax"
@@ -960,10 +1062,13 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         """
         Making all types of supercells here.
         """
-        # Saving the relaxed structures in context variables
+        # Saving the relaxed structures in context variables. A failed relax (e.g. PwRelax exit 400
+        # with aiida-quantumespresso >= 5, which attaches no outputs) is reported explicitly first.
         try:
             self.ctx.discharged_unitcell_relaxed
         except AttributeError:
+            if self._report_subprocess_failure(self.ctx.discharged_workchain[-1], "discharged unitcell relax"):
+                return self.exit_codes.ERROR_STRUCTURE_NOT_FOUND
             try:
                 self.ctx.discharged_unitcell_relaxed = self.ctx.discharged_workchain[-1].outputs.output_structure
             except exceptions.NotExistent:
@@ -973,6 +1078,8 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         try:
             self.ctx.charged_unitcell_relaxed
         except AttributeError:
+            if self._report_subprocess_failure(self.ctx.charged_workchain[-1], "charged unitcell relax"):
+                return self.exit_codes.ERROR_STRUCTURE_NOT_FOUND
             try:
                 self.ctx.charged_unitcell_relaxed = self.ctx.charged_workchain[-1].outputs.output_structure
             except exceptions.NotExistent:
@@ -1068,18 +1175,14 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         inputs = AttributeDict(self.exposed_inputs(PwRelaxWorkChain, namespace="ocv_relax"))
         inputs["structure"] = structure
 
-        # Since it's in orm.Dict datatype, I need to get the python dict to make changes to it.
-        inputs.base.pw.parameters = inputs.base.pw.parameters.get_dict()
-        if remove_cation:
-            inputs.base_final_scf.pw.parameters = (inputs.base_final_scf.pw.parameters.get_dict())
-
-        if not self.ctx.ocv_parameters_d["SOC_vc_relax"]:
-            inputs.base.pw.parameters["CONTROL"]["calculation"] = "relax"
-            inputs.base.pw.parameters.pop("CELL", None)
-
-        if remove_cation:
-            self._remove_cation_from_pw_inputs(inputs.base.pw)
-            self._remove_cation_from_pw_inputs(inputs.base_final_scf.pw)
+        for namespace in self._pw_namespaces(inputs):
+            self._dictify_parameters(namespace.pw)
+            if not self.ctx.ocv_parameters_d["SOC_vc_relax"]:
+                parameters = namespace.pw.parameters
+                parameters.setdefault("CONTROL", {})["calculation"] = "relax"
+                parameters.pop("CELL", None)
+            if remove_cation:
+                self._remove_cation_from_pw_inputs(namespace.pw)
 
         inputs.metadata.call_link_label = label
         inputs.metadata.label = label
@@ -1149,6 +1252,18 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
         """
         Inspects the workchains to see if all the required energies are properly calculated at various states of charge.
         """
+        # Report any failed sub-workchain explicitly before reading its outputs. 
+        # PwRelax hitting exit 400 with aiida-quantumespresso >= 5 attaches none.
+        to_check = []
+        if self.ctx.ocv_parameters_d["do_low_SOC_OCV"]:
+            to_check += [(workchain, "low SOC relax") for workchain in self.ctx.low_SOC_workchains]
+        if self.ctx.ocv_parameters_d["do_high_SOC_OCV"]:
+            to_check += [(workchain, "high SOC relax") for workchain in self.ctx.high_SOC_workchains]
+            to_check.append((self.ctx.constrained_charged_workchain[-1], "constrained charged relax"))
+        for workchain, label in to_check:
+            if self._report_subprocess_failure(workchain, label):
+                return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
+
         try:
             if self.ctx.ocv_parameters_d["do_low_SOC_OCV"]:
                 # Select the lowest-energy output among the low-SOC structures that were launched.
@@ -1191,6 +1306,12 @@ class OCVWorkChain(ProtocolMixin, WorkChain):
                 "the high/low SOC PwRelaxWorkChains did not generate output parameters/structures"
             )
             return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
+        for workchain, label in (
+            (self.ctx.charged_workchain[-1], "charged unitcell"),
+            (self.ctx.discharged_workchain[-1], "discharged unitcell"),
+        ):
+            if self._report_subprocess_failure(workchain, label):
+                return self.exit_codes.ERROR_DFT_ENERGY_NOT_FOUND
         try:
             self.ctx.charged_d = self.ctx.charged_workchain[
                 -1

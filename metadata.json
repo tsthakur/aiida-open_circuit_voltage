@@ -1,14 +1,19 @@
 {
-  "description": "An AiiDA plugin to calcutlate open circuit voltages at various charge of states for any arbitrary cathode material. A demonstrator of BIG-MAP common workflow api initiative.",
+  "description": "An AiiDA plugin to calculate open circuit voltages at various charge of states for any arbitrary cathode material. A demonstrator of BIG-MAP common workflow api initiative.",
   "title": "AiiDA open circuit voltage",
-  "version": "0.2.0",
+  "version": "0.7.0",
   "authors": "Tushar Thakur",
-  "logo": Null,
+  "logo": null,
   "state": "development",
   "requires": {
-    ">=0.1": [
-      "aiida-core~=1.6",
-      "aiida-quantumespresso~=3.4"
+    ">=0.7": [
+      "aiida-core~=2.8",
+      "aiida-quantumespresso~=5.0"
+    ],
+    ">=0.5,<0.7": [
+      "aiida-core>=1.1.0",
+      "aiida-quantumespresso>=4.6,<5",
+      "aiida-hubbard>=0.5,<0.7"
     ]
   }
 }
