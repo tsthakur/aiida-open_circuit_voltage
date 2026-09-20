@@ -1,17 +1,17 @@
 # aiida-open_circuit_voltage
-An AiiDA plugin to calcutlate open circuit voltages at various charge of states for any arbitrary cathode material.
+An AiiDA plugin to calculate open circuit voltages at various charge of states for any arbitrary cathode material.
 
 ## Requirements
-AiiDA see https://aiida.readthedocs.io/projects/aiida-core/en/latest/intro/get_started.html
-
-Supercellor see https://github.com/lekah/supercellor
+- AiiDA (`aiida-core` 2.8), see https://aiida.readthedocs.io/projects/aiida-core/en/latest/intro/get_started.html
+- `aiida-quantumespresso` 5.x, see https://github.com/aiidateam/aiida-quantumespresso
+- `supercellor`, see https://github.com/lekah/supercellor
 
 ## Installation
 To install from the sources run:
 ```
 git clone https://github.com/tsthakur/aiida-open_circuit_voltage.git
-
-pip install aiida-open_circuit_voltage
+cd aiida-open_circuit_voltage
+pip install -e .
 ```
 
 ## Example Run
@@ -20,12 +20,15 @@ To import the structure refer to the instructions here - https://aiida.readthedo
 
 ## DFT+U+V (extended Hubbard)
 
-By default the workchain computes all energies at plain GGA (PBEsol). To instead use
-self-consistent extended Hubbard parameters (`hp.x` linear response), pass an `hp_code` and a
-Hubbard *spec* describing which manifolds to correct. The discharged and charged unitcells are run
-through [`aiida-hubbard`](https://github.com/aiidateam/aiida-hubbard)'s `SelfConsistentHubbardWorkChain`; the converged U/V are then used (exactly
-for low-SOC supercells, per-symbol-averaged for the charged-composition cells) in fixed-U/V
-relaxations for every voltage-related energy.
+**Temporarily unsupported with aiida-quantumespresso 5.x.** 
+`aiida-hubbard` is currently not compatible with aiida-quantumespresso 5 (refer to https://github.com/aiidateam/aiida-hubbard/pull/119).
+To run DFT+U+V use this plugin at git tag `v0.6` (`git checkout v0.6`) together with aiida-quantumespresso 4.17 and aiida-hubbard 0.5.
+
+### How it works (v0.6)
+
+By default the workchain computes all energies at plain GGA (PBEsol). 
+To instead use self-consistent extended Hubbard parameters (`hp.x` linear response), pass an `hp_code` and a Hubbard *spec* describing which manifolds to correct. 
+The discharged and charged unitcells are run through [`aiida-hubbard`](https://github.com/aiidateam/aiida-hubbard)'s `SelfConsistentHubbardWorkChain`; the converged U/V are then used (exactly for low-SOC supercells, per-symbol-averaged for the charged-composition cells) in fixed-U/V relaxations for every voltage-related energy.
 
 ## Acknowledgements
 

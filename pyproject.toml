@@ -4,9 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aiida-open_circuit_voltage"
-version = "0.6"
+version = "0.7.0"
 description = "The AiiDA plugin to calculate ocv at various charge of states using QE"
 readme = "README.md"
+requires-python = ">=3.10"
 license = { text = "MIT License" }
 authors = [{ name = "Tushar Thakur", email = "tushar.thakur@epfl.ch" }]
 classifiers = [
@@ -17,11 +18,13 @@ classifiers = [
     "Natural Language :: English",
     "Intended Audience :: Science/Research",
 ]
+# DFT+U+V (Hubbard) mode is unsupported until aiida-hubbard releases aiida-quantumespresso 5 support (PR #119); use tag v0.6 for Hubbard runs. When it ships, add an optional extra hubbard = ["aiida-hubbard>=<that version>"].
 dependencies = [
-    "aiida-core>=1.1.0",
-    "aiida-quantumespresso>=4.6",
-    "aiida-hubbard>=0.5",
+    "aiida-core~=2.8",
+    "aiida-quantumespresso~=5.0",
     "supercellor>=0.0.1",
+    "numpy",
+    "importlib_resources",
 ]
 
 [project.urls]

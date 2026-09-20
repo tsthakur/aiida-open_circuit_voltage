@@ -14,17 +14,16 @@ default_inputs:
         do_low_SOC_OCV: True # if false the OCV at low SOC is not calculated and neither the low SOC supercell relaxed
         for_r2scan: False # if true, bypass the UUID-based workchain reuse so pre-relaxed endpoints / bulk cation are re-run with the (r2SCAN) functional in the inputs instead of reusing the PBEsol workchain that produced them
     ocv_relax:
-        # PwRelaxWorkChain reads `pseudo_family` from the `base` / `base_final_scf` namespaces, not
-        # at the top level, so it must be nested here (a top-level key is silently ignored).
-        base:
-            pseudo_family: 'SSSP/1.3/PBEsol/efficiency'
-        base_final_scf:
+        # PwRelaxWorkChain (aiida-quantumespresso >= 5) reads `pseudo_family` from the `base_relax`
+        # namespace, not at the top level (a top-level key is silently ignored).
+        base_relax:
             pseudo_family: 'SSSP/1.3/PBEsol/efficiency'
     # Overrides forwarded to SelfConsistentHubbardWorkChain.get_builder_from_protocol when the
     # workchain runs in Hubbard mode (a hubbard spec + hp_code are supplied). Completely ignored
     # for plain-GGA runs. Convergence tolerances and hp.x q-point meshes are taken from
     # aiida-hubbard's own protocols of the same name (fast/balanced/stringent), so they are not
     # duplicated here.
+    # To run Hubbard mode use plugin v0.6 (aiida-qe 4.17 + aiida-hubbard 0.5).
     hubbard_sc:
         skip_relax_iterations: 1  # settle U/V at the input geometry first (seeded from the spec's initial values, default ~ 1e-8)
         meta_convergence: True
@@ -35,7 +34,7 @@ default_inputs:
                     SYSTEM:
                         nosym: True
         relax:
-            base:
+            base_relax:
                 pseudo_family: 'SSSP/1.3/PBEsol/efficiency'
                 pw:
                     parameters:
@@ -64,18 +63,8 @@ protocols:
             SOC_vc_relax: True # do complete vc-relax
             SOC_relax_all_supercells: True # use all unique supercells and consider the most stable one for ocv calculations
         ocv_relax:
-            volume_convergence: 0.01
-            base:
-                pseudo_family: 'SSSP/1.3/PBEsol/precision'
-                kpoints_distance: 0.10
-                meta_parameters:
-                    conv_thr_per_atom: 0.1e-9
-                    etot_conv_thr_per_atom: 0.5e-5
-                pw:
-                    parameters:
-                        CONTROL:
-                            forc_conv_thr: 0.5e-4
-            base_final_scf:
+            # These duplicate the aiida-quantumespresso `stringent` PwBase protocol and are kept explicit.
+            base_relax:
                 pseudo_family: 'SSSP/1.3/PBEsol/precision'
                 kpoints_distance: 0.10
                 meta_parameters:
@@ -89,7 +78,7 @@ protocols:
             scf:
                 pseudo_family: 'SSSP/1.3/PBEsol/precision'
             relax:
-                base:
+                base_relax:
                     pseudo_family: 'SSSP/1.3/PBEsol/precision'
 
     fast:
@@ -99,18 +88,8 @@ protocols:
             SOC_vc_relax: False # do not relax supercells, only do scf
             SOC_relax_all_supercells: False # use only one of the unique supercells for calculation
             volume_change_stability: False
-        ocv_relax: 
-            volume_convergence: 0.05
-            base:
-                kpoints_distance: 0.5
-                meta_parameters:
-                    conv_thr_per_atom: 4.e-9
-                    etot_conv_thr_per_atom: 1.e-4
-                pw:
-                    parameters:
-                        CONTROL:
-                            forc_conv_thr: 1.e-3
-            base_final_scf:
+        ocv_relax:
+            base_relax:
                 kpoints_distance: 0.5
                 meta_parameters:
                     conv_thr_per_atom: 4.e-9
@@ -120,3 +99,21 @@ protocols:
                         CONTROL:
                             forc_conv_thr: 1.e-3
 
+# "Meta inputs" that are not direct ports of the process, used by ProtocolMixin._validate_override_keys
+# together with the process spec so that unknown override keys (e.g. the pre-5.0 `ocv_relax.base`,
+# `ocv_relax.base_final_scf`, `ocv_relax.volume_convergence` or `hubbard_sc.relax.base`) emit a warning
+# instead of being silently ignored.
+meta_inputs_schema:
+    ocv_relax:
+        base_relax: &pw_base_meta
+            meta_parameters:
+                conv_thr_per_atom:
+                etot_conv_thr_per_atom:
+            pseudo_family:
+        base_init_relax: *pw_base_meta
+    scf: *pw_base_meta
+    hubbard_sc:
+        scf: *pw_base_meta
+        relax:
+            base_relax: *pw_base_meta
+            base_init_relax: *pw_base_meta
